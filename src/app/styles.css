@@ -129,11 +129,6 @@ h1 {
   text-shadow: 0 12px 40px rgba(0, 0, 0, 0.42);
 }
 
-.landing-shell .eyebrow {
-  color: #ffd892;
-  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.42);
-}
-
 .lede {
   max-width: 620px;
   color: #54463a;
@@ -206,6 +201,11 @@ h1 {
 .landing-shell .save-panel h2 {
   color: #fff7e5;
   text-shadow: 0 3px 18px rgba(0, 0, 0, 0.42);
+}
+
+.landing-shell .save-panel .eyebrow {
+  color: #ffd892;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.42);
 }
 
 .save-panel-heading span {
