@@ -646,6 +646,77 @@ h1 {
   color: #5f3d1f;
 }
 
+.turn-stage-hint {
+  animation: pulse-soft 1.2s ease-in-out infinite;
+  color: #704a25;
+  margin: 12px 0 0;
+}
+
+.message-line.placeholder {
+  animation: breathing 1.4s ease-in-out infinite;
+}
+
+.move-button-placeholder {
+  animation: breathing 1.4s ease-in-out infinite;
+}
+
+.skeleton-line {
+  background: linear-gradient(
+    90deg,
+    rgba(134, 91, 46, 0.12),
+    rgba(134, 91, 46, 0.2),
+    rgba(134, 91, 46, 0.12)
+  );
+  background-size: 220% 100%;
+  border-radius: 999px;
+  display: block;
+  height: 12px;
+  margin: 0 0 10px;
+  width: 100%;
+  animation: shimmer 1.35s linear infinite;
+}
+
+.skeleton-line.short {
+  width: 48%;
+}
+
+.skeleton-line.long {
+  width: 76%;
+}
+
+.move-button-placeholder .skeleton-line {
+  margin: 0;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: -100% 50%;
+  }
+}
+
+@keyframes breathing {
+  0%,
+  100% {
+    opacity: 0.72;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 .status-list {
   display: grid;
   gap: 14px;

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import type {
   Adventure,
   AdventureCandidatePreview,
@@ -48,7 +48,7 @@ type NewAdventureModalState =
 
 type TurnState =
   | { status: "idle" }
-  | { status: "loading" }
+  | { status: "running"; stage: TurnStage }
   | { status: "error"; message: string };
 
 type JourneyMemoryState =
@@ -57,6 +57,13 @@ type JourneyMemoryState =
   | { status: "error"; message: string };
 
 type MoveOption = Pick<SuggestedMove, "id" | "label" | "intent">;
+type TurnStage = "classifying" | "generating" | "finalizing";
+
+const turnStageLabels: Record<TurnStage, string> = {
+  classifying: "正在理解你的行动意图…",
+  generating: "正在生成旁白与局势变化…",
+  finalizing: "正在整理推荐行动…"
+};
 
 const journeyMemoryTabs: ReadonlyArray<{ label: string; type: JourneyMemoryEntryType }> = [
   { label: "身份", type: "identity" },
@@ -449,7 +456,8 @@ function PlayScreen({ adventure, session, onReturnHome }: PlayScreenProps) {
   const [activeJourneyMemoryType, setActiveJourneyMemoryType] =
     useState<JourneyMemoryEntryType>("identity");
   const [hasNewJourneyMemory, setHasNewJourneyMemory] = useState(false);
-  const isSubmitting = turnState.status === "loading";
+  const stageTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const isSubmitting = turnState.status === "running";
   const canSendDraft = draft.trim().length > 0 && !isSubmitting;
   const journeyMemoryEntries =
     journeyMemoryState.status === "success" ? journeyMemoryState.entries : [];
@@ -477,6 +485,13 @@ function PlayScreen({ adventure, session, onReturnHome }: PlayScreenProps) {
       isActive = false;
     };
   }, [session.id]);
+
+  useEffect(
+    () => () => {
+      clearTurnStageTimers(stageTimersRef);
+    },
+    []
+  );
 
   async function refreshJourneyMemory(markAsUpdated: boolean) {
     const previousLatest =
@@ -510,17 +525,34 @@ function PlayScreen({ adventure, session, onReturnHome }: PlayScreenProps) {
       return;
     }
 
-    setTurnState({ status: "loading" });
+    clearTurnStageTimers(stageTimersRef);
+    setTurnState({ status: "running", stage: "classifying" });
+    stageTimersRef.current.push(
+      setTimeout(() => {
+        setTurnState((current) =>
+          current.status === "running" ? { status: "running", stage: "generating" } : current
+        );
+      }, 420)
+    );
+    stageTimersRef.current.push(
+      setTimeout(() => {
+        setTurnState((current) =>
+          current.status === "running" ? { status: "running", stage: "finalizing" } : current
+        );
+      }, 1200)
+    );
 
     try {
       const response = await submitTurn(session.id, trimmedContent, inputKind);
       setMessages((currentMessages) => [...currentMessages, ...response.messages]);
       setSuggestedMoves(response.suggestedMoves);
       setDraft("");
+      clearTurnStageTimers(stageTimersRef);
       setTurnState({ status: "idle" });
       void refreshJourneyMemory(true);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "提交回合失败";
+      clearTurnStageTimers(stageTimersRef);
       setTurnState({ status: "error", message });
     }
   }
@@ -553,6 +585,15 @@ function PlayScreen({ adventure, session, onReturnHome }: PlayScreenProps) {
               ))}
             </div>
           ) : null}
+
+          {turnState.status === "running" ? (
+            <article className="message-line placeholder" aria-live="polite">
+              <p className="message-role">旁白（生成中）</p>
+              <p className="skeleton-line short" />
+              <p className="skeleton-line" />
+              <p className="skeleton-line long" />
+            </article>
+          ) : null}
         </div>
 
         <section className="action-composer" aria-labelledby="action-title">
@@ -564,18 +605,35 @@ function PlayScreen({ adventure, session, onReturnHome }: PlayScreenProps) {
           </div>
 
           <div className="move-list" aria-label="可选行动">
-            {suggestedMoves.map((move) => (
-              <button
-                type="button"
-                className="move-button"
-                disabled={isSubmitting}
-                key={move.id}
-                onClick={() => void handleSubmitTurn(move.intent, "suggested-move")}
-              >
-                {move.label}
-              </button>
-            ))}
+            {turnState.status === "running"
+              ? [1, 2, 3].map((index) => (
+                  <button
+                    key={`placeholder-move-${index}`}
+                    type="button"
+                    className="move-button move-button-placeholder"
+                    disabled
+                  >
+                    <span className="skeleton-line" />
+                  </button>
+                ))
+              : suggestedMoves.map((move) => (
+                  <button
+                    type="button"
+                    className="move-button"
+                    disabled={isSubmitting}
+                    key={move.id}
+                    onClick={() => void handleSubmitTurn(move.intent, "suggested-move")}
+                  >
+                    {move.label}
+                  </button>
+                ))}
           </div>
+
+          {turnState.status === "running" ? (
+            <p className="turn-stage-hint" aria-live="polite">
+              {turnStageLabels[turnState.stage]}
+            </p>
+          ) : null}
 
           <form
             onSubmit={(event) => {
@@ -651,6 +709,13 @@ function PlayScreen({ adventure, session, onReturnHome }: PlayScreenProps) {
       ) : null}
     </main>
   );
+}
+
+function clearTurnStageTimers(stageTimersRef: MutableRefObject<ReturnType<typeof setTimeout>[]>) {
+  for (const timer of stageTimersRef.current) {
+    clearTimeout(timer);
+  }
+  stageTimersRef.current = [];
 }
 
 type JourneyMemorySummaryProps = {
