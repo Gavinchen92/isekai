@@ -20,11 +20,21 @@ import {
   type WorldSeedPreset
 } from "../domain";
 
+export class ApiRequestError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+  }
+}
+
 export async function fetchWorldSeeds(): Promise<readonly WorldSeedPreset[]> {
   const response = await fetch("/api/world-seeds");
 
   if (!response.ok) {
-    throw new Error(`fetch world seeds failed: ${response.status}`);
+    throwApiRequestError("fetch world seeds", response.status);
   }
 
   return WorldSeedPresetListSchema.parse(await response.json());
@@ -44,7 +54,7 @@ export async function generateAdventureCandidates(
   });
 
   if (!response.ok) {
-    throw new Error(`generate adventure candidates failed: ${response.status}`);
+    throwApiRequestError("generate adventure candidates", response.status);
   }
 
   return AdventureCandidatePreviewListSchema.parse(await response.json());
@@ -76,7 +86,7 @@ export async function createAdventure(
   });
 
   if (!response.ok) {
-    throw new Error(`create adventure failed: ${response.status}`);
+    throwApiRequestError("create adventure", response.status);
   }
 
   return AdventureSchema.parse(await response.json());
@@ -92,7 +102,7 @@ export async function createSession(adventureId: string): Promise<Session> {
   });
 
   if (!response.ok) {
-    throw new Error(`create session failed: ${response.status}`);
+    throwApiRequestError("create session", response.status);
   }
 
   return SessionSchema.parse(await response.json());
@@ -106,7 +116,7 @@ export async function fetchLatestSessionSnapshot(): Promise<SessionSnapshot | un
   }
 
   if (!response.ok) {
-    throw new Error(`fetch latest session failed: ${response.status}`);
+    throwApiRequestError("fetch latest session", response.status);
   }
 
   return SessionSnapshotSchema.parse(await response.json());
@@ -116,7 +126,7 @@ export async function fetchSessionSnapshot(sessionId: string): Promise<SessionSn
   const response = await fetch(`/api/sessions/${sessionId}`);
 
   if (!response.ok) {
-    throw new Error(`fetch session ${sessionId} failed: ${response.status}`);
+    throwApiRequestError(`fetch session ${sessionId}`, response.status);
   }
 
   return SessionSnapshotSchema.parse(await response.json());
@@ -126,7 +136,7 @@ export async function fetchJourneyMemory(sessionId: string): Promise<readonly Jo
   const response = await fetch(`/api/sessions/${sessionId}/journey-memory`);
 
   if (!response.ok) {
-    throw new Error(`fetch journey memory failed: ${response.status}`);
+    throwApiRequestError("fetch journey memory", response.status);
   }
 
   return JourneyMemoryEntryListSchema.parse(await response.json());
@@ -146,7 +156,7 @@ export async function submitTurn(
   });
 
   if (!response.ok) {
-    throw new Error(`submit turn failed: ${response.status}`);
+    throwApiRequestError("submit turn", response.status);
   }
 
   return TurnResponseSchema.parse(await response.json());
@@ -167,7 +177,7 @@ export async function submitTurnStream(
   });
 
   if (!response.ok) {
-    throw new Error(`submit turn stream failed: ${response.status}`);
+    throwApiRequestError("submit turn stream", response.status);
   }
 
   if (!response.body) {
@@ -247,4 +257,8 @@ export async function submitTurnStream(
 
   bufferedText += decoder.decode();
   flushBufferedFrames(true);
+}
+
+function throwApiRequestError(operation: string, status: number): never {
+  throw new ApiRequestError(`${operation} failed: ${status}`, status);
 }

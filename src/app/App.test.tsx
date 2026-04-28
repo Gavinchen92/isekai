@@ -170,7 +170,9 @@ describe("App", () => {
       }
 
       if (requestUrl === "/api/sessions/latest") {
-        return Promise.resolve(new Response(JSON.stringify({ error: "Session not found" }), { status: 404 }));
+        return Promise.resolve(
+          new Response(JSON.stringify({ error: "Session not found" }), { status: 404 })
+        );
       }
 
       return Promise.resolve(new Response(null, { status: 404 }));
@@ -401,6 +403,50 @@ describe("App", () => {
 
     expect(candidateSignal?.aborted).toBe(true);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("does not expose internal candidate generation errors to players", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const requestUrl =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (requestUrl === "/api/world-seeds") {
+        return Promise.resolve(
+          new Response(JSON.stringify(worldSeeds), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          })
+        );
+      }
+
+      if (requestUrl === "/api/sessions/latest") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ error: "Session not found" }), { status: 404 })
+        );
+      }
+
+      if (requestUrl === "/api/adventure-candidates") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ error: "Adventure candidate generation failed" }), {
+            status: 502,
+            headers: { "Content-Type": "application/json" }
+          })
+        );
+      }
+
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "开始新冒险" }));
+    await userEvent.click((await screen.findAllByRole("button", { name: "选择这个世界" }))[0]!);
+
+    expect(
+      await screen.findByText("AI 服务超时或暂时不可用，请重试生成冒险入口。")
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/generate adventure candidates failed/u)).not.toBeInTheDocument();
+    expect(screen.queryByText(/502/u)).not.toBeInTheDocument();
   });
 
   it("starts a new adventure from a world seed modal", async () => {

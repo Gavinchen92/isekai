@@ -13,6 +13,7 @@ import type {
   WorldSeedPreset
 } from "../domain";
 import {
+  ApiRequestError,
   createAdventure,
   createSession,
   fetchJourneyMemory,
@@ -97,6 +98,11 @@ const journeyMemoryTypeLabels: Record<JourneyMemoryEntryType, string> = {
   item: "物件"
 };
 
+type UserErrorCopy = {
+  fallback: string;
+  upstream?: string;
+};
+
 export function App() {
   const [worldSeedsState, setWorldSeedsState] = useState<WorldSeedsState>({
     status: "loading"
@@ -132,7 +138,9 @@ export function App() {
       })
       .catch((error: unknown) => {
         if (isActive) {
-          const message = error instanceof Error ? error.message : "加载世界种子失败";
+          const message = getUserFacingErrorMessage(error, {
+            fallback: "世界种子读取失败，请刷新页面重试。"
+          });
           setWorldSeedsState({ status: "error", message });
         }
       });
@@ -226,7 +234,10 @@ export function App() {
         return;
       }
 
-      const message = error instanceof Error ? error.message : "生成冒险候选失败";
+      const message = getUserFacingErrorMessage(error, {
+        fallback: "生成冒险入口失败，请重试。",
+        upstream: "AI 服务超时或暂时不可用，请重试生成冒险入口。"
+      });
       setNewAdventureModalState({
         status: "error",
         worldSeedId: seedId,
@@ -286,13 +297,16 @@ export function App() {
         return;
       }
 
-      const detail = error instanceof Error ? error.message : "创建冒险失败";
+      const message = getUserFacingErrorMessage(error, {
+        fallback: "完整冒险包生成失败，可以重试当前候选或重新选择世界。",
+        upstream: "完整冒险包生成失败，AI 服务超时或暂时不可用。可以重试当前候选或重新选择世界。"
+      });
       setNewAdventureModalState({
         ...modalStateBeforeStart,
         startAdventureState: {
           status: "error",
           candidateId: candidate.id,
-          message: `完整冒险包生成失败，可以重试当前候选或重新选择世界。${detail}`
+          message
         }
       });
     } finally {
@@ -386,7 +400,9 @@ async function refreshLatestSession(
 
     setState(snapshot ? { status: "success", snapshot } : { status: "empty" });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "读取本地存档失败";
+    const message = getUserFacingErrorMessage(error, {
+      fallback: "读取本地存档失败，请稍后重试。"
+    });
 
     setState({ status: "error", message });
   }
@@ -676,7 +692,9 @@ function PlayScreen({
       })
       .catch((error: unknown) => {
         if (isActive) {
-          const message = error instanceof Error ? error.message : "读取旅途见闻失败";
+          const message = getUserFacingErrorMessage(error, {
+            fallback: "读取旅途见闻失败，请稍后重试。"
+          });
           setJourneyMemoryState({ status: "error", message });
         }
       });
@@ -707,7 +725,9 @@ function PlayScreen({
         setHasNewJourneyMemory(true);
       }
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "读取旅途见闻失败";
+      const message = getUserFacingErrorMessage(error, {
+        fallback: "读取旅途见闻失败，请稍后重试。"
+      });
       setJourneyMemoryState({ status: "error", message });
     }
   }
@@ -822,7 +842,10 @@ function PlayScreen({
       setTurnState({ status: "idle" });
       void refreshJourneyMemory(true);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "提交回合失败";
+      const message = getUserFacingErrorMessage(error, {
+        fallback: "这一步没有生成成功，请重试。",
+        upstream: "这一步没有生成成功，AI 服务可能暂时不可用，请重试。"
+      });
       const { assistantId, userId } = currentTurnMessageIdsRef.current;
 
       if (assistantId || userId) {
@@ -1001,6 +1024,22 @@ function clearTurnStageTimers(stageTimersRef: MutableRefObject<ReturnType<typeof
     clearTimeout(timer);
   }
   stageTimersRef.current = [];
+}
+
+function getUserFacingErrorMessage(error: unknown, copy: UserErrorCopy): string {
+  if (isLikelyUpstreamFailure(error) && copy.upstream) {
+    return copy.upstream;
+  }
+
+  return copy.fallback;
+}
+
+function isLikelyUpstreamFailure(error: unknown): boolean {
+  if (error instanceof ApiRequestError) {
+    return error.status === 502 || error.status === 503 || error.status === 504;
+  }
+
+  return false;
 }
 
 type JourneyMemorySummaryProps = {
