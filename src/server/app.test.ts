@@ -575,6 +575,44 @@ describe("POST /api/turns", () => {
     expect(response.statusCode).toBe(404);
   });
 
+  it("returns a retryable upstream error without leaking internal turn failures", async () => {
+    const previousEnv = {
+      GM_PROVIDER: process.env.GM_PROVIDER
+    };
+    const server = createServer();
+    const { adventure } = await createAdventureFromGeneratedCandidate(server, "isekai");
+    const sessionResponse = await server.inject({
+      method: "POST",
+      url: "/api/sessions",
+      payload: {
+        adventureId: adventure.id
+      }
+    });
+    const session = SessionSchema.parse(sessionResponse.json());
+
+    process.env.GM_PROVIDER = "unsupported-provider";
+
+    try {
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/turns",
+        payload: {
+          sessionId: session.id,
+          content: "继续"
+        }
+      });
+
+      expect(response.statusCode).toBe(502);
+      expect(response.json()).toEqual({
+        error: "Turn generation failed"
+      });
+      expect(response.body).not.toContain("Unsupported input intent provider");
+    } finally {
+      await server.close();
+      restoreEnv(previousEnv);
+    }
+  });
+
   it("still returns a successful turn when post-processing fails", async () => {
     const server = createServer();
     const extractSpy = vi
@@ -756,6 +794,9 @@ describe("POST /api/turns/stream", () => {
 
       expect(turnResponse.statusCode).toBe(200);
       expect(turnResponse.body).toContain("event: turn_error");
+      expect(turnResponse.body).toContain('"message":"Turn generation failed"');
+      expect(turnResponse.body).not.toContain("journeyMemoryCandidates.0.type");
+      expect(turnResponse.body).not.toContain("lore");
       expect(llmRequestFields).toMatchObject({
         operation: "turn_stream",
         sessionId: session.id,

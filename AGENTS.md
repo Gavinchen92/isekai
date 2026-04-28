@@ -10,6 +10,7 @@
 - 测试分层和必测链路看 `docs/testing.md`。
 - 长期协作方式看 `docs/engineering-agreement.md`。
 - `docs/competitive-research.md` 只作为竞品参考，不直接等同于本地版需求。
+- `docs/personal-current-core-architecture.md` 是个人阅读用的架构说明，不作为需求、架构或实现依据；agent 执行时仍以代码和上述文档为准。
 
 聊天里的临时结论不自动成为长期需求。涉及产品边界、架构、API、AI 输出契约或存档结构的方向变化，按 `docs/engineering-agreement.md` 同步更新文档；小的明确修复不需要为了改文档而阻塞实现。
 

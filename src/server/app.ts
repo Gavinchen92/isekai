@@ -20,6 +20,8 @@ import { listWorldSeedPresets } from "../services/world-seeds";
 import { createHealthResponse } from "../shared/health";
 import { appLogger, createLogTimer } from "../shared/logger";
 
+const TURN_GENERATION_FAILED_ERROR = "Turn generation failed";
+
 export function createServer() {
   const server = fastify({
     loggerInstance: appLogger
@@ -354,7 +356,9 @@ export function createServer() {
         },
         "turn_generation_failed"
       );
-      throw error;
+      return reply.status(502).send({
+        error: TURN_GENERATION_FAILED_ERROR
+      });
     }
   });
   server.post("/api/turns/stream", async (request, reply) => {
@@ -418,7 +422,7 @@ export function createServer() {
     } catch (error: unknown) {
       sendEvent({
         type: "turn_error",
-        message: error instanceof Error ? error.message : "turn stream failed"
+        message: TURN_GENERATION_FAILED_ERROR
       });
       request.log.error(
         {
