@@ -10,6 +10,7 @@ export const PlayerInputIntentSchema = z.enum([
 ]);
 
 export const MessageInputKindSchema = z.enum(["free", "suggested-move", "continue", "ooc"]);
+export const TurnPhaseSchema = z.enum(["classifying", "generating", "finalizing"]);
 
 export const InputIntentClassificationSchema = z.object({
   intent: PlayerInputIntentSchema,
@@ -92,12 +93,14 @@ export const SuggestedMoveSchema = z
 
 export const TurnResponseSchema = z.object({
   messages: z.array(MessageSchema).length(2),
-  suggestedMoves: z.array(SuggestedMoveSchema).min(1).max(3)
+  suggestedMoves: z.array(SuggestedMoveSchema).min(1).max(3),
+  phase: TurnPhaseSchema.optional()
 });
 
 export type PlayerInputIntent = z.infer<typeof PlayerInputIntentSchema>;
 export type MessageInputKind = z.infer<typeof MessageInputKindSchema>;
 export type InputIntentClassification = z.infer<typeof InputIntentClassificationSchema>;
+export type TurnPhase = z.infer<typeof TurnPhaseSchema>;
 export type Session = z.infer<typeof SessionSchema>;
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequestSchema>;
 export type CreateTurnRequest = z.infer<typeof CreateTurnRequestSchema>;

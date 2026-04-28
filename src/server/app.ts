@@ -198,7 +198,10 @@ export function createServer() {
         "turn_generation_completed"
       );
 
-      return turn;
+      return {
+        ...turn,
+        phase: "finalizing" as const
+      };
     } catch (error: unknown) {
       if (error instanceof Error && error.message.includes("session not found")) {
         return reply.status(404).send({
