@@ -163,8 +163,8 @@ describe("App", () => {
         sessionId: "session-1",
         type: "identity",
         title: "我的身份",
-        summary: "外来者",
-        details: ["你刚抵达此地。"],
+        summary: "局内人",
+        details: ["你和当地有旧关系。"],
         visibility: "known",
         relatedNpcIds: [],
         relatedLocationIds: [],
@@ -218,6 +218,7 @@ describe("App", () => {
       if (input === "/api/adventures" && init?.method === "POST") {
         expect(JSON.parse(String(init.body))).toEqual({
           candidateId: "isekai-candidate-1",
+          selectedPlayerSetupId: "insider",
           worldSeedId: "isekai"
         });
         expect(String(init.body)).not.toContain("hiddenGmNotes");
@@ -231,7 +232,7 @@ describe("App", () => {
               sourceCandidateId: candidates[0]?.id,
               worldSeedId: "isekai",
               currentAct: "act1",
-              selectedPlayerSetupId: "wanderer",
+              selectedPlayerSetupId: "insider",
               createdAt: "2026-04-27T00:00:00.000Z",
               updatedAt: "2026-04-27T00:00:00.000Z"
             }),
@@ -374,13 +375,20 @@ describe("App", () => {
     expect(screen.queryByText("银色符文在脚下熄灭。")).not.toBeInTheDocument();
     expect(screen.queryByText("召唤事故释放旧封印。")).not.toBeInTheDocument();
 
+    const defaultIdentityOption = screen.getByRole("radio", { name: /外来者/u });
+    const selectedIdentityOption = screen.getByRole("radio", { name: /局内人/u });
+
+    expect(defaultIdentityOption).toBeChecked();
+    await userEvent.click(selectedIdentityOption);
+    expect(selectedIdentityOption).toBeChecked();
+
     await userEvent.click(screen.getByRole("button", { name: "开始这个冒险" }));
 
     expect(await screen.findByRole("heading", { name: "你要怎么做？" })).toBeInTheDocument();
     expect(screen.getByText("银色符文在脚下熄灭。")).toBeInTheDocument();
     expect(screen.queryByText("召唤事故释放旧封印。")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "旅途见闻" })).toBeInTheDocument();
-    expect(await screen.findByText("外来者")).toBeInTheDocument();
+    expect(await screen.findByText("局内人")).toBeInTheDocument();
     expect(screen.getByText("断星高塔")).toBeInTheDocument();
     expect(screen.queryByText("当前章节")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "当前目标" })).not.toBeInTheDocument();

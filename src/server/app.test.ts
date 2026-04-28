@@ -18,7 +18,8 @@ afterEach(() => {
 
 async function createAdventureFromGeneratedCandidate(
   server: ReturnType<typeof createServer>,
-  worldSeedId: WorldSeedId
+  worldSeedId: WorldSeedId,
+  options: { selectedPlayerSetupIndex?: number } = {}
 ) {
   const candidateResponse = await server.inject({
     method: "POST",
@@ -33,11 +34,17 @@ async function createAdventureFromGeneratedCandidate(
     throw new Error("missing generated candidate");
   }
 
+  const selectedPlayerSetupId =
+    options.selectedPlayerSetupIndex === undefined
+      ? undefined
+      : candidate.playerSetupOptions[options.selectedPlayerSetupIndex]?.id;
+
   const adventureResponse = await server.inject({
     method: "POST",
     url: "/api/adventures",
     payload: {
       candidateId: candidate.id,
+      ...(selectedPlayerSetupId ? { selectedPlayerSetupId } : {}),
       worldSeedId
     }
   });
@@ -45,7 +52,8 @@ async function createAdventureFromGeneratedCandidate(
   return {
     adventure: AdventureSchema.parse(adventureResponse.json()),
     adventureResponse,
-    candidate
+    candidate,
+    selectedPlayerSetupId
   };
 }
 
@@ -147,6 +155,19 @@ describe("POST /api/adventures", () => {
     expect(adventure.currentAct).toBe("act1");
   });
 
+  it("creates an adventure with a selected player setup", async () => {
+    const server = createServer();
+    const { adventure, adventureResponse, selectedPlayerSetupId } =
+      await createAdventureFromGeneratedCandidate(server, "ancient-china", {
+        selectedPlayerSetupIndex: 1
+      });
+
+    await server.close();
+
+    expect(adventureResponse.statusCode).toBe(200);
+    expect(adventure.selectedPlayerSetupId).toBe(selectedPlayerSetupId);
+  });
+
   it("rejects invalid adventure creation requests", async () => {
     const server = createServer();
     const response = await server.inject({
@@ -160,6 +181,39 @@ describe("POST /api/adventures", () => {
     await server.close();
 
     expect(response.statusCode).toBe(400);
+  });
+
+  it("rejects player setup ids outside the selected candidate", async () => {
+    const server = createServer();
+    const candidateResponse = await server.inject({
+      method: "POST",
+      url: "/api/adventure-candidates",
+      payload: {
+        worldSeedId: "isekai"
+      }
+    });
+    const [candidate] = AdventureCandidatePreviewListSchema.parse(candidateResponse.json());
+
+    if (!candidate) {
+      throw new Error("missing generated candidate");
+    }
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/adventures",
+      payload: {
+        candidateId: candidate.id,
+        selectedPlayerSetupId: "missing-player-setup",
+        worldSeedId: "isekai"
+      }
+    });
+
+    await server.close();
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: "Player setup option does not belong to adventure candidate"
+    });
   });
 });
 

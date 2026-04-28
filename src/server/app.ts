@@ -110,6 +110,15 @@ export function createServer() {
         });
       }
 
+      if (
+        error instanceof Error &&
+        error.message.includes("player setup option does not belong")
+      ) {
+        return reply.status(400).send({
+          error: "Player setup option does not belong to adventure candidate"
+        });
+      }
+
       throw error;
     }
   });

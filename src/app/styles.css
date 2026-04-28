@@ -301,6 +301,56 @@ h1 {
   margin: 0;
 }
 
+.setup-options {
+  border: 0;
+  display: grid;
+  gap: 10px;
+  margin: 18px 0 0;
+  padding: 0;
+}
+
+.setup-options legend {
+  color: #865b2e;
+  font-size: 13px;
+  margin-bottom: 8px;
+  padding: 0;
+}
+
+.setup-option {
+  align-items: flex-start;
+  border: 1px solid rgba(34, 27, 21, 0.16);
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  padding: 11px 12px;
+}
+
+.setup-option:has(input:checked) {
+  border-color: #865b2e;
+  box-shadow: inset 0 0 0 1px rgba(134, 91, 46, 0.24);
+}
+
+.setup-option input {
+  margin-top: 3px;
+}
+
+.setup-option span {
+  display: grid;
+  gap: 4px;
+}
+
+.setup-option strong {
+  color: #2f251d;
+  font-size: 15px;
+}
+
+.setup-option small {
+  color: #54463a;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .muted,
 .error {
   color: #54463a;

@@ -38,14 +38,17 @@ export function createAdventureFromCandidate(request: {
   worldSeedId: CreateAdventureRequest["worldSeedId"];
 }): Adventure {
   const now = new Date().toISOString();
+  const selectedPlayerSetupId = resolveSelectedPlayerSetupId(
+    request.candidate,
+    request.selectedPlayerSetupId
+  );
   const adventure = AdventureSchema.parse({
     ...request.candidate,
     id: createId("adventure"),
     sourceCandidateId: request.candidate.id,
     worldSeedId: request.worldSeedId,
     currentAct: "act1",
-    selectedPlayerSetupId:
-      request.selectedPlayerSetupId ?? request.candidate.playerSetupOptions[0]?.id,
+    selectedPlayerSetupId,
     createdAt: now,
     updatedAt: now
   });
@@ -57,4 +60,23 @@ export function createAdventureFromCandidate(request: {
 
 export function getAdventure(adventureId: string): Adventure | undefined {
   return adventures.get(adventureId);
+}
+
+function resolveSelectedPlayerSetupId(
+  candidate: AdventureCandidate,
+  selectedPlayerSetupId?: string
+): string {
+  const resolvedPlayerSetupId = selectedPlayerSetupId ?? candidate.playerSetupOptions[0]?.id;
+
+  if (!resolvedPlayerSetupId) {
+    throw new Error(`adventure candidate has no player setup options: ${candidate.id}`);
+  }
+
+  if (!candidate.playerSetupOptions.some((option) => option.id === resolvedPlayerSetupId)) {
+    throw new Error(
+      `player setup option does not belong to adventure candidate: ${resolvedPlayerSetupId}`
+    );
+  }
+
+  return resolvedPlayerSetupId;
 }

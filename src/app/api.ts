@@ -6,6 +6,7 @@ import {
   TurnResponseSchema,
   type Adventure,
   type AdventureCandidatePreview,
+  type CreateAdventureRequest,
   type JourneyMemoryEntry,
   type MessageInputKind,
   type Session,
@@ -45,14 +46,25 @@ export async function generateAdventureCandidates(
 
 export async function createAdventure(
   worldSeedId: WorldSeedId,
-  candidateId: string
+  candidateId: string,
+  selectedPlayerSetupId?: string
 ): Promise<Adventure> {
+  const requestBody: CreateAdventureRequest = selectedPlayerSetupId
+    ? {
+        candidateId,
+        selectedPlayerSetupId,
+        worldSeedId
+      }
+    : {
+        candidateId,
+        worldSeedId
+      };
   const response = await fetch("/api/adventures", {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ worldSeedId, candidateId })
+    body: JSON.stringify(requestBody)
   });
 
   if (!response.ok) {

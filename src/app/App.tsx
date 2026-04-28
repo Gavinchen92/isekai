@@ -173,7 +173,10 @@ export function App() {
     }
   }
 
-  async function handleStartAdventure(candidate: AdventureCandidatePreview) {
+  async function handleStartAdventure(
+    candidate: AdventureCandidatePreview,
+    selectedPlayerSetupId?: string
+  ) {
     if (newAdventureModalState.status !== "selecting-candidate") {
       return;
     }
@@ -188,7 +191,11 @@ export function App() {
     });
 
     try {
-      const adventure = await createAdventure(modalStateBeforeStart.worldSeedId, candidate.id);
+      const adventure = await createAdventure(
+        modalStateBeforeStart.worldSeedId,
+        candidate.id,
+        selectedPlayerSetupId
+      );
       const session = await createSession(adventure.id);
 
       if (modalRequestIdRef.current !== requestId) {
@@ -248,7 +255,9 @@ export function App() {
           onRegenerate={(seedId) => void handleSelectWorldSeed(seedId)}
           onReselectWorld={() => setNewAdventureModalState({ status: "selecting-seed" })}
           onSelectWorld={(seedId) => void handleSelectWorldSeed(seedId)}
-          onStartAdventure={(candidate) => void handleStartAdventure(candidate)}
+          onStartAdventure={(candidate, selectedPlayerSetupId) =>
+            void handleStartAdventure(candidate, selectedPlayerSetupId)
+          }
           worldSeedsState={worldSeedsState}
         />
       ) : null}
@@ -263,7 +272,10 @@ type NewAdventureModalProps = {
   onRegenerate: (seedId: WorldSeedId) => void;
   onReselectWorld: () => void;
   onSelectWorld: (seedId: WorldSeedId) => void;
-  onStartAdventure: (candidate: AdventureCandidatePreview) => void;
+  onStartAdventure: (
+    candidate: AdventureCandidatePreview,
+    selectedPlayerSetupId?: string
+  ) => void;
 };
 
 function NewAdventureModal({
@@ -377,7 +389,10 @@ type CandidateSelectionProps = {
   modalState: Extract<NewAdventureModalState, { status: "selecting-candidate" }>;
   selectedSeedName?: string;
   onReselectWorld: () => void;
-  onStartAdventure: (candidate: AdventureCandidatePreview) => void;
+  onStartAdventure: (
+    candidate: AdventureCandidatePreview,
+    selectedPlayerSetupId?: string
+  ) => void;
 };
 
 function CandidateSelection({
@@ -386,6 +401,23 @@ function CandidateSelection({
   onStartAdventure,
   selectedSeedName
 }: CandidateSelectionProps) {
+  const [selectedPlayerSetupIdsByCandidateId, setSelectedPlayerSetupIdsByCandidateId] = useState<
+    Record<string, string>
+  >({});
+
+  function getSelectedPlayerSetupId(candidate: AdventureCandidatePreview): string | undefined {
+    return (
+      selectedPlayerSetupIdsByCandidateId[candidate.id] ?? candidate.playerSetupOptions[0]?.id
+    );
+  }
+
+  function handleSelectPlayerSetup(candidateId: string, playerSetupId: string) {
+    setSelectedPlayerSetupIdsByCandidateId((current) => ({
+      ...current,
+      [candidateId]: playerSetupId
+    }));
+  }
+
   return (
     <>
       <div className="modal-subheader">
@@ -404,33 +436,47 @@ function CandidateSelection({
       ) : null}
 
       <div className="candidate-grid">
-        {modalState.candidates.map((candidate) => (
-          <article className="candidate-card" key={candidate.id}>
-            <p className="candidate-label">{candidate.tags.slice(0, 2).join(" / ")}</p>
-            <h3>{candidate.title}</h3>
-            <p>{candidate.teaser}</p>
-            <dl>
-              <div>
-                <dt>可选身份</dt>
-                <dd>{candidate.playerSetupOptions.map((option) => option.title).join(" / ")}</dd>
-              </div>
-            </dl>
-            <button
-              type="button"
-              className="card-action"
-              disabled={
-                modalState.startAdventureState.status === "loading" &&
-                modalState.startAdventureState.candidateId === candidate.id
-              }
-              onClick={() => onStartAdventure(candidate)}
-            >
-              {modalState.startAdventureState.status === "loading" &&
-              modalState.startAdventureState.candidateId === candidate.id
-                ? "进入中..."
-                : "开始这个冒险"}
-            </button>
-          </article>
-        ))}
+        {modalState.candidates.map((candidate) => {
+          const selectedPlayerSetupId = getSelectedPlayerSetupId(candidate);
+          const isStartingThisCandidate =
+            modalState.startAdventureState.status === "loading" &&
+            modalState.startAdventureState.candidateId === candidate.id;
+
+          return (
+            <article className="candidate-card" key={candidate.id}>
+              <p className="candidate-label">{candidate.tags.slice(0, 2).join(" / ")}</p>
+              <h3>{candidate.title}</h3>
+              <p>{candidate.teaser}</p>
+              <fieldset className="setup-options">
+                <legend>选择身份</legend>
+                {candidate.playerSetupOptions.map((option) => (
+                  <label className="setup-option" key={option.id}>
+                    <input
+                      checked={selectedPlayerSetupId === option.id}
+                      disabled={modalState.startAdventureState.status === "loading"}
+                      name={`player-setup-${candidate.id}`}
+                      type="radio"
+                      value={option.id}
+                      onChange={() => handleSelectPlayerSetup(candidate.id, option.id)}
+                    />
+                    <span>
+                      <strong>{option.title}</strong>
+                      <small>{option.description}</small>
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
+              <button
+                type="button"
+                className="card-action"
+                disabled={isStartingThisCandidate || !selectedPlayerSetupId}
+                onClick={() => onStartAdventure(candidate, selectedPlayerSetupId)}
+              >
+                {isStartingThisCandidate ? "进入中..." : "开始这个冒险"}
+              </button>
+            </article>
+          );
+        })}
       </div>
     </>
   );

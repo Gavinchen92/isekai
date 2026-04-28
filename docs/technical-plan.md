@@ -156,7 +156,7 @@ POST /api/sessions/:id/journey-memory/extract
 POST /api/turns
 ```
 
-`POST /api/adventure-candidates` 只返回 `AdventureCandidatePreview[]`，用于玩家选择冒险入口；完整候选保存在服务端。`POST /api/adventures` 只接收 `candidateId` 和 `worldSeedId`，不能要求前端回传完整候选，避免把主线、结局、胜败条件或隐藏 GM notes 暴露给玩家端。
+`POST /api/adventure-candidates` 只返回 `AdventureCandidatePreview[]`，用于玩家选择冒险入口；完整候选保存在服务端。`POST /api/adventures` 只接收 `candidateId`、`worldSeedId` 和可选 `selectedPlayerSetupId`，不能要求前端回传完整候选，避免把主线、结局、胜败条件或隐藏 GM notes 暴露给玩家端。
 
 计划项：
 
