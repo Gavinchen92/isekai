@@ -61,7 +61,7 @@ type TurnStage = "classifying" | "generating" | "finalizing";
 
 const turnStageLabels: Record<TurnStage, string> = {
   classifying: "正在理解你的行动意图…",
-  generating: "正在生成旁白与局势变化…",
+  generating: "正在生成故事与局势变化…",
   finalizing: "正在整理推荐行动…"
 };
 
@@ -508,6 +508,7 @@ function PlayScreen({ adventure, session, onReturnHome }: PlayScreenProps) {
   const journeyMemoryEntries =
     journeyMemoryState.status === "success" ? journeyMemoryState.entries : [];
   const journeyMemorySummaryEntries = buildJourneyMemorySummaryEntries(journeyMemoryEntries);
+  const storyMessages = messages.filter((message) => message.role === "assistant");
 
   useEffect(() => {
     let isActive = true;
@@ -617,29 +618,29 @@ function PlayScreen({ adventure, session, onReturnHome }: PlayScreenProps) {
           <h1 id="play-title">{adventure.title}</h1>
           <p className="play-pitch">{adventure.pitch}</p>
 
-          <div className="story-block">
-            <p>{adventure.openingScene}</p>
-          </div>
-
-          {messages.length > 0 ? (
-            <div className="message-list" aria-label="回合记录">
-              {messages.map((message) => (
-                <article className={`message-line ${message.role}`} key={message.id}>
-                  <p className="message-role">{message.role === "user" ? "你" : "旁白"}</p>
-                  <p>{message.content}</p>
-                </article>
-              ))}
-            </div>
-          ) : null}
-
-          {turnState.status === "running" ? (
-            <article className="message-line placeholder" aria-live="polite">
-              <p className="message-role">旁白（生成中）</p>
-              <p className="skeleton-line short" />
-              <p className="skeleton-line" />
-              <p className="skeleton-line long" />
+          <div className="story-list" aria-label="故事记录">
+            <article className="story-card">
+              <p>{adventure.openingScene}</p>
             </article>
-          ) : null}
+
+            {storyMessages.map((message) => (
+              <article className="story-card" key={message.id}>
+                <p>{message.content}</p>
+              </article>
+            ))}
+
+            {turnState.status === "running" ? (
+              <article
+                aria-label="故事生成中"
+                aria-live="polite"
+                className="story-card story-card-placeholder"
+              >
+                <p className="skeleton-line short" />
+                <p className="skeleton-line" />
+                <p className="skeleton-line long" />
+              </article>
+            ) : null}
+          </div>
         </div>
 
         <section className="action-composer" aria-labelledby="action-title">

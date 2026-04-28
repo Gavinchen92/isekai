@@ -407,47 +407,24 @@ h1 {
   max-width: 760px;
 }
 
-.story-block {
-  border-left: 3px solid #865b2e;
-  margin: 8px 0 0;
-  padding: 6px 0 6px clamp(18px, 3vw, 28px);
-}
-
-.story-block p {
-  color: #2f251d;
-  font-size: clamp(24px, 3.4vw, 42px);
-  line-height: 1.45;
-  margin: 0;
-}
-
-.message-list {
+.story-list {
   display: grid;
   gap: 14px;
   max-width: 820px;
 }
 
-.message-line {
+.story-card {
   background: rgba(255, 250, 240, 0.52);
   border: 1px solid rgba(34, 27, 21, 0.12);
   border-left: 3px solid rgba(134, 91, 46, 0.36);
   border-radius: 8px;
-  padding: 13px 16px;
+  padding: 15px 18px;
 }
 
-.message-line.user {
-  border-left-color: #221b15;
-}
-
-.message-line p {
+.story-card p {
   color: #3b3028;
   line-height: 1.55;
   margin: 0;
-}
-
-.message-role {
-  color: #865b2e !important;
-  font-size: 13px;
-  margin-bottom: 4px !important;
 }
 
 .action-composer {
@@ -702,7 +679,7 @@ h1 {
   margin: 12px 0 0;
 }
 
-.message-line.placeholder {
+.story-card-placeholder {
   animation: breathing 1.4s ease-in-out infinite;
 }
 

@@ -401,6 +401,7 @@ describe("App", () => {
     expect(screen.queryByText("阻止封印碎片落入魔王信徒手中。")).not.toBeInTheDocument();
     expect(screen.queryByText("城邦被封印污染吞没。")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "返回首页" })).toBeInTheDocument();
+    expect(screen.queryByText(/旁白/u)).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "查看" }));
 
@@ -418,8 +419,11 @@ describe("App", () => {
     await userEvent.type(screen.getByRole("textbox", { name: "你的下一步行动" }), "我尝试调查高塔入口");
     await userEvent.click(screen.getByRole("button", { name: "发送" }));
 
-    expect(await screen.findByText("我尝试调查高塔入口")).toBeInTheDocument();
-    expect(screen.getByText("你开始行动。断星高塔入口的旧痕连在一起，指向更深处。")).toBeInTheDocument();
+    expect(
+      await screen.findByText("你开始行动。断星高塔入口的旧痕连在一起，指向更深处。")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("我尝试调查高塔入口")).not.toBeInTheDocument();
+    expect(screen.queryByText(/旁白/u)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "尝试向 莉瑟 追问关键细节" })).toBeInTheDocument();
     expect(await screen.findByText("有新见闻")).toBeInTheDocument();
 
