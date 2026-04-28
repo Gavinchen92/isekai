@@ -3,6 +3,7 @@ import {
   AdventureCandidatePreviewListSchema,
   JourneyMemoryEntryListSchema,
   SessionSchema,
+  TurnStreamEventSchema,
   TurnResponseSchema,
   type Adventure,
   type AdventureCandidatePreview,
@@ -10,6 +11,7 @@ import {
   type MessageInputKind,
   type Session,
   type TurnResponse,
+  type TurnStreamEvent,
   WorldSeedPresetListSchema,
   type WorldSeedId,
   type WorldSeedPreset
@@ -106,4 +108,66 @@ export async function submitTurn(
   }
 
   return TurnResponseSchema.parse(await response.json());
+}
+
+export async function submitTurnStream(
+  sessionId: string,
+  content: string,
+  inputKind: MessageInputKind,
+  onEvent: (event: TurnStreamEvent) => void
+): Promise<void> {
+  const response = await fetch("/api/turns/stream", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ sessionId, content, inputKind })
+  });
+
+  if (!response.ok) {
+    throw new Error(`submit turn stream failed: ${response.status}`);
+  }
+
+  if (!response.body) {
+    throw new Error("submit turn stream failed: response body is empty");
+  }
+
+  let pendingEventType = "";
+  const handleFrame = (frame: string) => {
+    const lines = frame.split("\n");
+    let payload = "";
+
+    for (const line of lines) {
+      if (line.startsWith("event:")) {
+        pendingEventType = line.slice("event:".length).trim();
+      }
+
+      if (line.startsWith("data:")) {
+        payload += `${line.slice("data:".length).trim()}\n`;
+      }
+    }
+
+    if (!payload.trim()) {
+      return;
+    }
+
+    const parsedPayload = JSON.parse(payload.trim()) as { type?: string; message?: string };
+    const eventType = parsedPayload.type ?? pendingEventType;
+
+    if (eventType === "turn_error") {
+      throw new Error(parsedPayload.message ?? "turn stream failed");
+    }
+
+    onEvent(TurnStreamEventSchema.parse(parsedPayload));
+  };
+
+  const streamText = await response.text();
+  const frames = streamText
+    .split("\n\n")
+    .map((frame) => frame.trim())
+    .filter(Boolean);
+
+  for (const frame of frames) {
+    handleFrame(frame);
+  }
 }

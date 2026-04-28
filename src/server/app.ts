@@ -10,7 +10,7 @@ import { generateAdventureCandidatePreviews } from "../services/adventure-candid
 import { createAdventure } from "../services/adventures";
 import { listJourneyMemory } from "../services/journey-memory";
 import { createSession, getSession } from "../services/sessions";
-import { createTurn, refreshJourneyMemoryForSession } from "../services/turns";
+import { createTurn, createTurnStream, refreshJourneyMemoryForSession } from "../services/turns";
 import { listWorldSeedPresets } from "../services/world-seeds";
 import { createHealthResponse } from "../shared/health";
 import { appLogger, createLogTimer } from "../shared/logger";
@@ -217,6 +217,77 @@ export function createServer() {
         "turn_generation_failed"
       );
       throw error;
+    }
+  });
+  server.post("/api/turns/stream", async (request, reply) => {
+    const parsedRequest = CreateTurnRequestSchema.safeParse(request.body);
+
+    if (!parsedRequest.success) {
+      return reply.status(400).send({
+        error: "Invalid turn request",
+        issues: parsedRequest.error.flatten().fieldErrors
+      });
+    }
+
+    const getDurationMs = createLogTimer();
+    request.log.info(
+      {
+        event: "turn_stream_started",
+        inputKind: parsedRequest.data.inputKind,
+        requestId: request.id,
+        sessionId: parsedRequest.data.sessionId
+      },
+      "turn_stream_started"
+    );
+
+    reply.hijack();
+    reply.raw.statusCode = 200;
+    reply.raw.setHeader("content-type", "text/event-stream; charset=utf-8");
+    reply.raw.setHeader("cache-control", "no-cache");
+    reply.raw.setHeader("connection", "keep-alive");
+    reply.raw.flushHeaders?.();
+
+    const sendEvent = (event: unknown) => {
+      if (!("type" in (event as Record<string, unknown>))) {
+        return;
+      }
+
+      const eventType = String((event as { type: string }).type);
+      reply.raw.write(`event: ${eventType}\n`);
+      reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+    };
+
+    try {
+      for await (const event of createTurnStream(parsedRequest.data)) {
+        sendEvent(event);
+      }
+
+      request.log.info(
+        {
+          durationMs: getDurationMs(),
+          event: "turn_stream_completed",
+          requestId: request.id,
+          sessionId: parsedRequest.data.sessionId
+        },
+        "turn_stream_completed"
+      );
+    } catch (error: unknown) {
+      sendEvent({
+        type: "turn_error",
+        message: error instanceof Error ? error.message : "turn stream failed"
+      });
+      request.log.error(
+        {
+          durationMs: getDurationMs(),
+          err: error,
+          event: "turn_stream_failed",
+          requestId: request.id,
+          sessionId: parsedRequest.data.sessionId
+        },
+        "turn_stream_failed"
+      );
+    } finally {
+      reply.raw.end();
     }
   });
 

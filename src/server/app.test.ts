@@ -4,6 +4,7 @@ import {
   AdventureSchema,
   JourneyMemoryEntryListSchema,
   SessionSchema,
+  TurnStreamEventSchema,
   TurnResponseSchema,
   type WorldSeedId,
   WorldSeedPresetListSchema
@@ -283,6 +284,59 @@ describe("POST /api/turns", () => {
     await server.close();
 
     expect(response.statusCode).toBe(404);
+  });
+});
+
+describe("POST /api/turns/stream", () => {
+  it("streams staged turn events in order", async () => {
+    const server = createServer();
+    const { adventure } = await createAdventureFromGeneratedCandidate(server, "isekai");
+    const sessionResponse = await server.inject({
+      method: "POST",
+      url: "/api/sessions",
+      payload: {
+        adventureId: adventure.id
+      }
+    });
+    const session = SessionSchema.parse(sessionResponse.json());
+    const turnResponse = await server.inject({
+      method: "POST",
+      url: "/api/turns/stream",
+      payload: {
+        sessionId: session.id,
+        content: "我尝试调查高塔入口"
+      }
+    });
+
+    await server.close();
+
+    const blocks = turnResponse.body
+      .trim()
+      .split("\n\n")
+      .map((block) => block.trim())
+      .filter(Boolean);
+    const events = blocks.map((block) => {
+      const lines = block.split("\n");
+      const dataLine = lines.find((line) => line.startsWith("data:"));
+
+      if (!dataLine) {
+        throw new Error("missing data line");
+      }
+
+      return TurnStreamEventSchema.parse(JSON.parse(dataLine.slice("data:".length).trim()));
+    });
+
+    expect(turnResponse.statusCode).toBe(200);
+    expect(events.map((event) => event.type)).toEqual([
+      "turn_started",
+      "narration_chunk",
+      "suggested_moves_ready",
+      "turn_completed"
+    ]);
+    expect(events[0]?.type).toBe("turn_started");
+    expect(events[1]?.type).toBe("narration_chunk");
+    expect(events[2]?.type).toBe("suggested_moves_ready");
+    expect(events[3]?.type).toBe("turn_completed");
   });
 });
 

@@ -166,12 +166,21 @@ describe("resolveOpenAiGmProviderConfig", () => {
   });
 
   it("uses the OpenAI base URL by default", () => {
+    const previousBaseUrl = process.env.OPENAI_BASE_URL;
+    delete process.env.OPENAI_BASE_URL;
+
     const config = resolveOpenAiGmProviderConfig({
       apiKey: "test-key",
       model: "test-model"
     });
 
     expect(config.baseUrl).toBe("https://api.openai.com/v1");
+
+    if (previousBaseUrl === undefined) {
+      delete process.env.OPENAI_BASE_URL;
+    } else {
+      process.env.OPENAI_BASE_URL = previousBaseUrl;
+    }
   });
 });
 
