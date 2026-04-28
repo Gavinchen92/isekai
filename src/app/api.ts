@@ -132,9 +132,15 @@ export async function submitTurnStream(
     throw new Error("submit turn stream failed: response body is empty");
   }
 
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
   let pendingEventType = "";
+  let bufferedText = "";
+
   const handleFrame = (frame: string) => {
-    const lines = frame.split("\n");
+    const lines = frame
+      .split("\n")
+      .map((line) => line.replace(/\r$/u, ""));
     let payload = "";
 
     for (const line of lines) {
@@ -161,13 +167,42 @@ export async function submitTurnStream(
     onEvent(TurnStreamEventSchema.parse(parsedPayload));
   };
 
-  const streamText = await response.text();
-  const frames = streamText
-    .split("\n\n")
-    .map((frame) => frame.trim())
-    .filter(Boolean);
+  const flushBufferedFrames = (flushRemainder = false) => {
+    const separator = "\n\n";
+    let separatorIndex = bufferedText.indexOf(separator);
 
-  for (const frame of frames) {
-    handleFrame(frame);
+    while (separatorIndex !== -1) {
+      const frame = bufferedText.slice(0, separatorIndex).trim();
+      bufferedText = bufferedText.slice(separatorIndex + separator.length);
+
+      if (frame.length > 0) {
+        handleFrame(frame);
+      }
+
+      separatorIndex = bufferedText.indexOf(separator);
+    }
+
+    if (flushRemainder) {
+      const remainder = bufferedText.trim();
+      bufferedText = "";
+
+      if (remainder.length > 0) {
+        handleFrame(remainder);
+      }
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    bufferedText += decoder.decode(value, { stream: true });
+    flushBufferedFrames(false);
   }
+
+  bufferedText += decoder.decode();
+  flushBufferedFrames(true);
 }

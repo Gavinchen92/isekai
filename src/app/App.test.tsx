@@ -319,7 +319,7 @@ describe("App", () => {
         return Promise.resolve(
           new Response(stream, {
             status: 200,
-            headers: { "Content-Type": "application/json" }
+            headers: { "Content-Type": "text/event-stream" }
           })
         );
       }
