@@ -68,6 +68,8 @@ pnpm dev
 - `OPENAI_BASE_URL`：默认 `https://api.openai.com/v1`，兼容其他 OpenAI-compatible 服务。
 - `OPENAI_TEMPERATURE`：默认 `0.7`。
 - `OPENAI_TIMEOUT_MS`：默认 `60000`。
+- `OPENAI_PREVIEW_TEMPERATURE`：默认 `1.0`，只用于候选 preview。
+- `OPENAI_PREVIEW_THINKING`：默认 `disabled`，只用于候选 preview。
 
 也可以用 `GM_OPENAI_*` 前缀覆盖同名配置，例如 `GM_OPENAI_MODEL`。
 
@@ -79,3 +81,5 @@ pnpm dev
 pnpm smoke:candidates
 pnpm smoke:gm
 ```
+
+`smoke:candidates` 会先生成轻量候选 preview，再选中第一个候选生成完整 Adventure，用来验证两段式冒险生成链路。

@@ -103,7 +103,7 @@ OPENAI_MODEL=...
 OPENAI_BASE_URL=https://api.openai.com/v1 # 可选
 ```
 
-也支持 `GM_OPENAI_API_KEY`、`GM_OPENAI_MODEL`、`GM_OPENAI_BASE_URL`、`GM_OPENAI_TEMPERATURE`、`GM_OPENAI_TIMEOUT_MS` 作为 GM 专用覆盖项。
+也支持 `GM_OPENAI_API_KEY`、`GM_OPENAI_MODEL`、`GM_OPENAI_BASE_URL`、`GM_OPENAI_TEMPERATURE`、`GM_OPENAI_TIMEOUT_MS` 作为 GM 专用覆盖项。候选 preview 额外支持 `OPENAI_PREVIEW_TEMPERATURE` / `GM_OPENAI_PREVIEW_TEMPERATURE` 和 `OPENAI_PREVIEW_THINKING` / `GM_OPENAI_PREVIEW_THINKING`，默认 temperature 为 `1.0`、thinking 为 `disabled`，不影响完整冒险包和 GM 回合生成。
 
 AI 接入前先固定 `GM Context Builder`：
 
@@ -156,7 +156,7 @@ POST /api/sessions/:id/journey-memory/extract
 POST /api/turns
 ```
 
-`POST /api/adventure-candidates` 只返回 `AdventureCandidatePreview[]`，用于玩家选择冒险入口；完整候选保存在服务端。`POST /api/adventures` 只接收 `candidateId`、`worldSeedId` 和可选 `selectedPlayerSetupId`，不能要求前端回传完整候选，避免把主线、结局、胜败条件或隐藏 GM notes 暴露给玩家端。
+`POST /api/adventure-candidates` 只生成并返回 `AdventureCandidatePreview[]`，用于玩家选择冒险入口；真实 provider 下会按候选数量并发生成单个 preview concept，服务端保存内部 concept。`POST /api/adventures` 只接收 `candidateId`、`worldSeedId` 和可选 `selectedPlayerSetupId`，服务端在这里把被选中的 concept 补全为完整 `AdventureCandidate` 并创建 Adventure。前端不能回传完整候选，避免把主线、结局、胜败条件或隐藏 GM notes 暴露给玩家端。
 
 计划项：
 
@@ -198,12 +198,12 @@ PUT  /api/settings/provider
 优先覆盖：
 
 - Adventure candidate schema。
-- Adventure candidate preview 不泄露开局场景、主线矛盾、胜败条件、结局和隐藏 GM notes。
+- Adventure candidate preview 不生成也不泄露开局场景、主线矛盾、胜败条件、结局和隐藏 GM notes。
 - Suggested moves 不能声明结果。
 - 玩家越权输入降级。
 - prompt / context builder。
 - 旅途见闻只展示玩家已知信息，不泄露 GM 内部状态。
-- API smoke：生成候选 -> 创建 Adventure -> 创建 Session -> 发送消息。
+- API smoke：生成 preview 候选 -> 选中候选并生成完整 Adventure -> 创建 Session -> 发送消息。
 
 ## 9. 启动命令
 

@@ -9,6 +9,7 @@ import {
   parseGmTurnResultJson,
   resolveOpenAiGmProviderConfig
 } from "./openai-provider";
+import { requestOpenAiCompatibleJsonObject } from "./openai-compatible";
 import type { GmTurnInput, GmUserMessage } from "./provider";
 
 function createProviderInput(): GmTurnInput {
@@ -85,6 +86,7 @@ function createGmTurnResultContent(): string {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -131,6 +133,7 @@ describe("createOpenAiGmProvider", () => {
     });
     expect(body.messages).toHaveLength(2);
     expect(body.messages[1].content).toContain("hiddenGmNotes");
+    expect(body.thinking).toBeUndefined();
     expect(result.narration).toBe("你在塔底发现被刻意掩盖的脚印。");
     expect(result.suggestedMoves).toHaveLength(1);
   });
@@ -181,6 +184,165 @@ describe("resolveOpenAiGmProviderConfig", () => {
     } else {
       process.env.OPENAI_BASE_URL = previousBaseUrl;
     }
+  });
+});
+
+describe("requestOpenAiCompatibleJsonObject", () => {
+  const messages = [
+    {
+      role: "system" as const,
+      content: "system"
+    },
+    {
+      role: "user" as const,
+      content: "user"
+    }
+  ];
+  const config = {
+    apiKey: "test-key",
+    baseUrl: "https://example.test/v1",
+    model: "test-model",
+    temperature: 0.3,
+    timeoutMs: 1_000
+  };
+
+  it("supports per-request temperature and thinking overrides", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: "{\"ok\":true}"
+              }
+            }
+          ]
+        }),
+        {
+          status: 200
+        }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await requestOpenAiCompatibleJsonObject({
+      config,
+      label: "preview override",
+      messages,
+      temperature: 1.1,
+      thinking: "disabled"
+    });
+    const [, init] = fetchMock.mock.calls[0] as Parameters<typeof fetch>;
+    const body = JSON.parse(String((init as RequestInit).body));
+
+    expect(body.temperature).toBe(1.1);
+    expect(body.thinking).toEqual({
+      type: "disabled"
+    });
+  });
+
+  it("does not send thinking without a per-request override", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: "{\"ok\":true}"
+              }
+            }
+          ]
+        }),
+        {
+          status: 200
+        }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await requestOpenAiCompatibleJsonObject({
+      config,
+      label: "no thinking override",
+      messages
+    });
+    const [, init] = fetchMock.mock.calls[0] as Parameters<typeof fetch>;
+    const body = JSON.parse(String((init as RequestInit).body));
+
+    expect(body.temperature).toBe(0.3);
+    expect(body.thinking).toBeUndefined();
+  });
+
+  it("applies timeout while reading the response body", async () => {
+    vi.useFakeTimers();
+    const encoder = new TextEncoder();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (_url, init) => {
+        const signal = (init as RequestInit).signal as AbortSignal;
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoder.encode("{"));
+            signal.addEventListener("abort", () => {
+              controller.error(signal.reason);
+            });
+          }
+        });
+
+        return new Response(stream, {
+          status: 200
+        });
+      })
+    );
+
+    const request = requestOpenAiCompatibleJsonObject({
+      config,
+      label: "timeout body",
+      messages
+    });
+    const expectation = expect(request).rejects.toMatchObject({
+      name: "AbortError"
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expectation;
+  });
+
+  it("propagates an external abort signal", async () => {
+    const abortController = new AbortController();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (_url, init) => {
+        const signal = (init as RequestInit).signal as AbortSignal;
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            signal.addEventListener("abort", () => {
+              controller.error(signal.reason);
+            });
+          }
+        });
+
+        return new Response(stream, {
+          status: 200
+        });
+      })
+    );
+
+    const request = requestOpenAiCompatibleJsonObject({
+      config: {
+        ...config,
+        timeoutMs: 10_000
+      },
+      label: "external abort",
+      messages,
+      signal: abortController.signal
+    });
+
+    await Promise.resolve();
+    abortController.abort(new DOMException("closed", "AbortError"));
+
+    await expect(request).rejects.toMatchObject({
+      name: "AbortError"
+    });
   });
 });
 

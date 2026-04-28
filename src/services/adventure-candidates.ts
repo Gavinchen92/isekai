@@ -22,9 +22,11 @@ import {
 } from "../domain";
 import {
   requestOpenAiCompatibleJsonObject,
-  resolveOpenAiCompatibleProviderConfig
+  resolveOpenAiCompatibleProviderConfig,
+  type OpenAiCompatibleProviderConfig
 } from "./gm/openai-compatible";
 import { listWorldSeedPresets } from "./world-seeds";
+import { logEvent } from "../shared/logger";
 import { z } from "zod";
 
 type CandidateBlueprint = {
@@ -41,6 +43,37 @@ type CandidateBlueprint = {
   tags: string[];
   endingTone: EndingSeed["tone"];
 };
+
+const AdventureCandidatePreviewRequestConfigSchema = z.object({
+  temperature: z.coerce.number().min(0).max(2).default(1),
+  thinking: z.enum(["enabled", "disabled"]).default("disabled")
+});
+
+const adventureCandidatePreviewVariantFocuses = [
+  "事件钩子：用一个立即发生的突发事件带出冒险入口。",
+  "人物关系：用一个可互动人物和关系压力带出冒险入口。",
+  "地点谜团：用一个地点异常、禁忌或谜团带出冒险入口。"
+] as const;
+
+const AdventureCandidateConceptSchema = z.object({
+  id: z.string().min(1),
+  requestId: z.string().min(1),
+  title: z.string().min(1),
+  teaser: z.string().min(1),
+  playerSetupOptions: z.array(PlayerSetupOptionSchema).min(2).max(4),
+  tags: z.array(z.string().min(1)).min(1).max(8)
+});
+
+const AdventureCandidateConceptDraftSchema = z.object({
+  title: z.string().min(1),
+  teaser: z.string().min(1),
+  playerSetupOptions: z.array(PlayerSetupOptionSchema.omit({ id: true })).min(2).max(4),
+  tags: z.array(z.string().min(1)).min(1).max(8)
+});
+
+const AdventureCandidateConceptDraftResponseSchema = z.object({
+  candidates: z.array(AdventureCandidateConceptDraftSchema).min(1).max(3)
+});
 
 const AdventureCandidateDraftSchema = z.object({
   title: z.string().min(1),
@@ -78,10 +111,51 @@ const AdventureCandidateDraftResponseSchema = z.object({
   candidates: z.array(AdventureCandidateDraftSchema).min(1).max(3)
 });
 
+const AdventureCandidateDetailDraftSchema = AdventureCandidateDraftSchema.omit({
+  playerSetupOptions: true,
+  tags: true,
+  title: true
+});
+
+const AdventureCandidateDetailDraftResponseSchema = z.object({
+  adventure: AdventureCandidateDetailDraftSchema
+});
+
+type AdventureCandidateConcept = z.infer<typeof AdventureCandidateConceptSchema>;
+type AdventureCandidateConceptDraft = z.infer<typeof AdventureCandidateConceptDraftSchema>;
+type AdventureCandidateDetailDraft = z.infer<typeof AdventureCandidateDetailDraftSchema>;
 type AdventureCandidateDraft = z.infer<typeof AdventureCandidateDraftSchema>;
+type AdventureCandidatePreviewRequestConfig = z.infer<
+  typeof AdventureCandidatePreviewRequestConfigSchema
+>;
+type AdventureCandidatePreviewVariantFocus =
+  (typeof adventureCandidatePreviewVariantFocuses)[number];
 type StoredAdventureCandidate = {
-  candidate: AdventureCandidate;
+  candidate?: AdventureCandidate;
+  concept: AdventureCandidateConcept;
+  providerName: string;
+  request: AdventureCandidateGenerationRequest;
   worldSeedId: WorldSeedId;
+};
+
+type GenerateAdventureCandidateOptions = {
+  signal?: AbortSignal;
+};
+
+type PreviewConceptGenerationInput = {
+  avoidTitles: readonly string[];
+  config: OpenAiCompatibleProviderConfig;
+  previewConfig: AdventureCandidatePreviewRequestConfig;
+  request: AdventureCandidateGenerationRequest;
+  seed: WorldSeedPreset;
+  signal?: AbortSignal;
+  variantFocus: AdventureCandidatePreviewVariantFocus;
+  variantIndex: number;
+};
+
+type PreviewConceptGenerationResult = {
+  concept: AdventureCandidateConcept;
+  generationInput: PreviewConceptGenerationInput;
 };
 
 const adventureCandidatesById = new Map<string, StoredAdventureCandidate>();
@@ -394,8 +468,20 @@ export function generateMockAdventureCandidates(
   return AdventureCandidateListSchema.parse(candidates);
 }
 
-export async function generateAdventureCandidates(
+export function generateMockAdventureCandidateConcepts(
   rawRequest: unknown
+): readonly AdventureCandidateConcept[] {
+  const request = AdventureCandidateGenerationRequestSchema.parse(rawRequest);
+
+  return AdventureCandidateConceptSchema.array()
+    .min(1)
+    .max(3)
+    .parse(generateMockAdventureCandidates(request).map(createAdventureCandidateConceptFromCandidate));
+}
+
+export async function generateAdventureCandidates(
+  rawRequest: unknown,
+  options: GenerateAdventureCandidateOptions = {}
 ): Promise<readonly AdventureCandidate[]> {
   const request = AdventureCandidateGenerationRequestSchema.parse(rawRequest);
   const providerName = process.env.GM_PROVIDER ?? "mock";
@@ -405,21 +491,57 @@ export async function generateAdventureCandidates(
       return generateMockAdventureCandidates(request);
     case "openai":
     case "openai-compatible":
-      return generateOpenAiCompatibleAdventureCandidates(request);
+      return generateOpenAiCompatibleAdventureCandidates(request, options);
+    default:
+      throw new Error(`Unsupported adventure candidate provider: ${providerName}`);
+  }
+}
+
+export async function generateAdventureCandidateConcepts(
+  rawRequest: unknown,
+  options: GenerateAdventureCandidateOptions = {}
+): Promise<readonly AdventureCandidateConcept[]> {
+  const request = AdventureCandidateGenerationRequestSchema.parse(rawRequest);
+  const providerName = process.env.GM_PROVIDER ?? "mock";
+
+  switch (providerName) {
+    case "mock":
+      return generateMockAdventureCandidateConcepts(request);
+    case "openai":
+    case "openai-compatible":
+      return generateOpenAiCompatibleAdventureCandidateConcepts(request, options);
     default:
       throw new Error(`Unsupported adventure candidate provider: ${providerName}`);
   }
 }
 
 export async function generateAdventureCandidatePreviews(
-  rawRequest: unknown
+  rawRequest: unknown,
+  options: GenerateAdventureCandidateOptions = {}
 ): Promise<readonly AdventureCandidatePreview[]> {
   const request = AdventureCandidateGenerationRequestSchema.parse(rawRequest);
-  const candidates = await generateAdventureCandidates(request);
+  const providerName = process.env.GM_PROVIDER ?? "mock";
+  const concepts = await generateAdventureCandidateConcepts(request, options);
 
-  storeAdventureCandidates(request.worldSeedId, candidates);
+  storeAdventureCandidateConcepts(request.worldSeedId, request, concepts, providerName);
 
-  return AdventureCandidatePreviewListSchema.parse(candidates.map(createAdventureCandidatePreview));
+  return AdventureCandidatePreviewListSchema.parse(concepts.map(createAdventureCandidatePreview));
+}
+
+export function storeAdventureCandidateConcepts(
+  worldSeedId: WorldSeedId,
+  request: AdventureCandidateGenerationRequest,
+  concepts: readonly AdventureCandidateConcept[],
+  providerName = process.env.GM_PROVIDER ?? "mock"
+): void {
+  concepts.forEach((concept) => {
+    adventureCandidatesById.set(concept.id, {
+      concept,
+      providerName,
+      request,
+      worldSeedId
+    });
+  });
 }
 
 export function storeAdventureCandidates(
@@ -429,6 +551,12 @@ export function storeAdventureCandidates(
   candidates.forEach((candidate) => {
     adventureCandidatesById.set(candidate.id, {
       candidate,
+      concept: createAdventureCandidateConceptFromCandidate(candidate),
+      providerName: process.env.GM_PROVIDER ?? "mock",
+      request: {
+        candidateCount: candidates.length,
+        worldSeedId
+      },
       worldSeedId
     });
   });
@@ -438,14 +566,58 @@ export function getStoredAdventureCandidate(candidateId: string): StoredAdventur
   return adventureCandidatesById.get(candidateId);
 }
 
+export async function materializeAdventureCandidate(
+  candidateId: string,
+  options: GenerateAdventureCandidateOptions = {}
+): Promise<StoredAdventureCandidate | undefined> {
+  const storedCandidate = getStoredAdventureCandidate(candidateId);
+
+  if (!storedCandidate || storedCandidate.candidate) {
+    return storedCandidate;
+  }
+
+  const candidate = await generateAdventureCandidateFromConcept(storedCandidate, options);
+  const materializedCandidate = {
+    ...storedCandidate,
+    candidate
+  };
+
+  adventureCandidatesById.set(candidate.id, materializedCandidate);
+
+  return materializedCandidate;
+}
+
+async function generateAdventureCandidateFromConcept(
+  storedCandidate: StoredAdventureCandidate,
+  options: GenerateAdventureCandidateOptions
+): Promise<AdventureCandidate> {
+  switch (storedCandidate.providerName) {
+    case "mock": {
+      const candidates = generateMockAdventureCandidates(storedCandidate.request);
+      const candidate = candidates.find((item) => item.id === storedCandidate.concept.id);
+
+      if (!candidate) {
+        throw new Error(`mock adventure candidate not found: ${storedCandidate.concept.id}`);
+      }
+
+      return candidate;
+    }
+    case "openai":
+    case "openai-compatible":
+      return generateOpenAiCompatibleAdventureCandidateFromConcept(storedCandidate, options);
+    default:
+      throw new Error(`Unsupported adventure candidate provider: ${storedCandidate.providerName}`);
+  }
+}
+
 export function createAdventureCandidatePreview(
-  candidate: AdventureCandidate
+  candidate: AdventureCandidate | AdventureCandidateConcept
 ): AdventureCandidatePreview {
   return AdventureCandidatePreviewSchema.parse({
     id: candidate.id,
     requestId: candidate.requestId,
     title: candidate.title,
-    teaser: buildSpoilerFreeCandidateTeaser(candidate),
+    teaser: "teaser" in candidate ? candidate.teaser : buildSpoilerFreeCandidateTeaser(candidate),
     playerSetupOptions: candidate.playerSetupOptions.map((option) => ({
       id: option.id,
       title: option.title,
@@ -456,17 +628,278 @@ export function createAdventureCandidatePreview(
 }
 
 export async function generateOpenAiCompatibleAdventureCandidates(
-  request: AdventureCandidateGenerationRequest
+  request: AdventureCandidateGenerationRequest,
+  options: GenerateAdventureCandidateOptions = {}
 ): Promise<readonly AdventureCandidate[]> {
   const seed = getWorldSeed(request.worldSeedId);
   const config = resolveOpenAiCompatibleProviderConfig();
   const content = await requestOpenAiCompatibleJsonObject({
     config,
     label: "OpenAI-compatible adventure candidate",
-    messages: buildAdventureCandidatePromptMessages(seed, request)
+    messages: buildAdventureCandidatePromptMessages(seed, request),
+    signal: options.signal
   });
 
   return parseAdventureCandidateDraftJson(seed, request, content);
+}
+
+export async function generateOpenAiCompatibleAdventureCandidateConcepts(
+  request: AdventureCandidateGenerationRequest,
+  options: GenerateAdventureCandidateOptions = {}
+): Promise<readonly AdventureCandidateConcept[]> {
+  const seed = getWorldSeed(request.worldSeedId);
+  const config = resolveOpenAiCompatibleProviderConfig();
+  const previewConfig = resolveAdventureCandidatePreviewRequestConfig();
+  const generationInputs = Array.from({ length: request.candidateCount }, (_, index) =>
+    createPreviewConceptGenerationInput({
+      config,
+      index,
+      previewConfig,
+      request,
+      seed,
+      signal: options.signal
+    })
+  );
+  const settledResults = await Promise.allSettled(
+    generationInputs.map(async (input) => ({
+      concept: await generateOpenAiCompatibleAdventureCandidateConcept(input),
+      generationInput: input
+    }))
+  );
+  const failedResults = settledResults.filter((result) => result.status === "rejected");
+  const successfulResults = settledResults.flatMap((result) =>
+    result.status === "fulfilled" ? [result.value] : []
+  );
+
+  if (failedResults.length > 0 && successfulResults.length > 0) {
+    logEvent(
+      "adventure_candidate_preview_generation_partial_failure",
+      {
+        candidateCount: request.candidateCount,
+        failedCount: failedResults.length,
+        provider: "openai-compatible",
+        worldSeedId: request.worldSeedId
+      },
+      "warn"
+    );
+  }
+
+  if (successfulResults.length === 0) {
+    throw new Error("OpenAI-compatible adventure candidate preview generation failed");
+  }
+
+  return retryDuplicateAdventureCandidateConcepts({
+    generationResults: successfulResults,
+    request
+  });
+}
+
+async function generateOpenAiCompatibleAdventureCandidateConcept(
+  input: PreviewConceptGenerationInput
+): Promise<AdventureCandidateConcept> {
+  const content = await requestOpenAiCompatibleJsonObject({
+    config: input.config,
+    label: "OpenAI-compatible adventure candidate preview",
+    messages: buildAdventureCandidateConceptPromptMessages(input.seed, input.request, {
+      avoidTitles: input.avoidTitles,
+      variantFocus: input.variantFocus,
+      variantIndex: input.variantIndex,
+      variantSeed: crypto.randomUUID()
+    }),
+    signal: input.signal,
+    temperature: input.previewConfig.temperature,
+    thinking: input.previewConfig.thinking
+  });
+  const [concept] = parseAdventureCandidateConceptDraftJson(input.seed, input.request, content);
+
+  if (!concept) {
+    throw new Error("OpenAI-compatible adventure candidate preview response is empty");
+  }
+
+  return concept;
+}
+
+async function retryDuplicateAdventureCandidateConcepts(input: {
+  generationResults: readonly PreviewConceptGenerationResult[];
+  request: AdventureCandidateGenerationRequest;
+}): Promise<readonly AdventureCandidateConcept[]> {
+  const uniqueConcepts: AdventureCandidateConcept[] = [];
+  const duplicateInputs: PreviewConceptGenerationInput[] = [];
+  const seenKeys = new Set<string>();
+
+  input.generationResults.forEach((generationResult) => {
+    const key = createAdventureCandidateConceptDedupeKey(generationResult.concept);
+
+    if (seenKeys.has(key)) {
+      duplicateInputs.push(generationResult.generationInput);
+      return;
+    }
+
+    seenKeys.add(key);
+    uniqueConcepts.push(generationResult.concept);
+  });
+
+  if (duplicateInputs.length === 0) {
+    return uniqueConcepts;
+  }
+
+  const retryResults = await Promise.allSettled(
+    duplicateInputs.map((generationInput) =>
+      generateOpenAiCompatibleAdventureCandidateConcept({
+        ...generationInput,
+        avoidTitles: uniqueConcepts.map((concept) => concept.title)
+      })
+    )
+  );
+
+  retryResults.forEach((result) => {
+    if (result.status !== "fulfilled") {
+      return;
+    }
+
+    const key = createAdventureCandidateConceptDedupeKey(result.value);
+
+    if (seenKeys.has(key)) {
+      return;
+    }
+
+    seenKeys.add(key);
+    uniqueConcepts.push(result.value);
+  });
+
+  if (retryResults.some((result) => result.status === "rejected")) {
+    logEvent(
+      "adventure_candidate_preview_duplicate_retry_failed",
+      {
+        failedCount: retryResults.filter((result) => result.status === "rejected").length,
+        provider: "openai-compatible",
+        worldSeedId: input.request.worldSeedId
+      },
+      "warn"
+    );
+  }
+
+  return uniqueConcepts.slice(0, input.request.candidateCount);
+}
+
+function createPreviewConceptGenerationInput(input: {
+  config: OpenAiCompatibleProviderConfig;
+  index: number;
+  previewConfig: AdventureCandidatePreviewRequestConfig;
+  request: AdventureCandidateGenerationRequest;
+  seed: WorldSeedPreset;
+  signal?: AbortSignal;
+}): PreviewConceptGenerationInput {
+  return {
+    avoidTitles: [],
+    config: input.config,
+    previewConfig: input.previewConfig,
+    request: {
+      ...input.request,
+      candidateCount: 1
+    },
+    seed: input.seed,
+    signal: input.signal,
+    variantFocus:
+      adventureCandidatePreviewVariantFocuses[
+        input.index % adventureCandidatePreviewVariantFocuses.length
+      ] ?? adventureCandidatePreviewVariantFocuses[0],
+    variantIndex: input.index + 1
+  };
+}
+
+function resolveAdventureCandidatePreviewRequestConfig(
+  env: NodeJS.ProcessEnv = process.env
+): AdventureCandidatePreviewRequestConfig {
+  const result = AdventureCandidatePreviewRequestConfigSchema.safeParse({
+    temperature:
+      env.GM_OPENAI_PREVIEW_TEMPERATURE ?? env.OPENAI_PREVIEW_TEMPERATURE ?? undefined,
+    thinking: env.GM_OPENAI_PREVIEW_THINKING ?? env.OPENAI_PREVIEW_THINKING ?? undefined
+  });
+
+  if (!result.success) {
+    const issues = result.error.issues
+      .map((issue) => `${issue.path.join(".") || "config"}: ${issue.message}`)
+      .join("; ");
+
+    throw new Error(`Invalid OpenAI-compatible adventure candidate preview config: ${issues}`);
+  }
+
+  return result.data;
+}
+
+function createAdventureCandidateConceptDedupeKey(concept: AdventureCandidateConcept): string {
+  return `${normalizePreviewDedupeText(concept.title)}|${normalizePreviewDedupeText(
+    concept.teaser
+  )}`;
+}
+
+function normalizePreviewDedupeText(value: string): string {
+  return value.trim().toLocaleLowerCase().replace(/\s+/gu, "");
+}
+
+export async function generateOpenAiCompatibleAdventureCandidateFromConcept(
+  storedCandidate: StoredAdventureCandidate,
+  options: GenerateAdventureCandidateOptions = {}
+): Promise<AdventureCandidate> {
+  const seed = getWorldSeed(storedCandidate.worldSeedId);
+  const config = resolveOpenAiCompatibleProviderConfig();
+  const content = await requestOpenAiCompatibleJsonObject({
+    config,
+    label: "OpenAI-compatible adventure candidate full",
+    messages: buildAdventureCandidateDetailPromptMessages(seed, storedCandidate),
+    signal: options.signal
+  });
+
+  return parseAdventureCandidateDetailDraftJson(seed, storedCandidate.concept, content);
+}
+
+export function parseAdventureCandidateConceptDraftJson(
+  seed: WorldSeedPreset,
+  request: AdventureCandidateGenerationRequest,
+  content: string
+): readonly AdventureCandidateConcept[] {
+  let parsedJson: unknown;
+
+  try {
+    parsedJson = JSON.parse(content.trim());
+  } catch (error) {
+    throw new Error(
+      `OpenAI-compatible adventure candidate preview response is not valid JSON: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+
+  const parsedResponse = AdventureCandidateConceptDraftResponseSchema.parse(parsedJson);
+  const requestId = `${seed.id}-request-preview-${crypto.randomUUID()}`;
+  const concepts = parsedResponse.candidates
+    .slice(0, request.candidateCount)
+    .map((draft, index) => buildAdventureCandidateConceptFromDraft(seed, requestId, draft, index));
+
+  return AdventureCandidateConceptSchema.array().min(1).max(3).parse(concepts);
+}
+
+export function parseAdventureCandidateDetailDraftJson(
+  seed: WorldSeedPreset,
+  concept: AdventureCandidateConcept,
+  content: string
+): AdventureCandidate {
+  let parsedJson: unknown;
+
+  try {
+    parsedJson = JSON.parse(content.trim());
+  } catch (error) {
+    throw new Error(
+      `OpenAI-compatible adventure candidate full response is not valid JSON: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+
+  const parsedResponse = AdventureCandidateDetailDraftResponseSchema.parse(parsedJson);
+
+  return buildAdventureCandidateFromDetailDraft(seed, concept, parsedResponse.adventure);
 }
 
 export function parseAdventureCandidateDraftJson(
@@ -612,6 +1045,216 @@ function buildAdventureCandidatePromptMessages(
   ];
 }
 
+function buildAdventureCandidateConceptPromptMessages(
+  seed: WorldSeedPreset,
+  request: AdventureCandidateGenerationRequest,
+  variant: {
+    avoidTitles: readonly string[];
+    variantFocus: AdventureCandidatePreviewVariantFocus;
+    variantIndex: number;
+    variantSeed: string;
+  }
+) {
+  return [
+    {
+      role: "system" as const,
+      content: [
+        "你是本地文字冒险游戏的冒险入口设计 GM。",
+        "你只生成候选卡片需要的无剧透 preview，不生成完整冒险包。",
+        "输出必须是单个 JSON 对象，不要 Markdown，不要解释，不要代码块。",
+        "JSON 顶层必须是 {\"candidates\": [...]}。",
+        `candidates 必须正好包含 ${request.candidateCount} 个候选。`,
+        "每个候选只包含 title, teaser, playerSetupOptions, tags。",
+        "playerSetupOptions 必须有 2-4 个，每个身份包含 title, description, startingGoal。",
+        "teaser 只能描述公开氛围和入口，不泄露具体主线真相、胜败条件、结局或隐藏 GM 笔记。",
+        "creativeVariant.variantSeed 只用于增加创意随机性，不要输出 seed。",
+        "必须围绕 creativeVariant.variantFocus 做出明显差异化。",
+        "avoidTitles 中的标题不要重复使用。",
+        "不要生成任何 id 字段，服务端会生成 id。"
+      ].join("\n")
+    },
+    {
+      role: "user" as const,
+      content: JSON.stringify({
+        outputTemplate: {
+          candidates: [
+            {
+              title: "断塔召唤",
+              teaser: "一座破碎高塔把陌生人卷入城邦警钟，召唤事故背后的危机仍藏在阴影里。",
+              playerSetupOptions: [
+                {
+                  title: "外来者",
+                  description: "你刚抵达此地，没有固定阵营，容易被各方试探。",
+                  startingGoal: "弄清自己被卷入事件的原因"
+                },
+                {
+                  title: "局内人",
+                  description: "你和当地某个势力有旧关系，也因此背负更多风险。",
+                  startingGoal: "保护旧关系，同时查清眼前事故"
+                }
+              ],
+              tags: ["召唤", "城邦", "悬疑"]
+            }
+          ]
+        },
+        avoidTitles: variant.avoidTitles,
+        creativeVariant: {
+          variantFocus: variant.variantFocus,
+          variantIndex: variant.variantIndex,
+          variantSeed: variant.variantSeed
+        },
+        request: {
+          candidateCount: request.candidateCount,
+          dangerLevel: request.dangerLevel ?? "medium",
+          fantasyLevel: request.fantasyLevel ?? "medium",
+          playerRoleHint: request.playerRoleHint ?? null,
+          tone: request.tone ?? seed.defaultTone
+        },
+        allowedValues: {
+          dangerLevel: AdventureIntensitySchema.options,
+          fantasyLevel: AdventureIntensitySchema.options,
+          tone: AdventureToneSchema.options
+        },
+        worldSeed: seed
+      })
+    }
+  ];
+}
+
+function buildAdventureCandidateDetailPromptMessages(
+  seed: WorldSeedPreset,
+  storedCandidate: StoredAdventureCandidate
+) {
+  const request = storedCandidate.request;
+  const concept = storedCandidate.concept;
+
+  return [
+    {
+      role: "system" as const,
+      content: [
+        "你是本地文字冒险游戏的冒险生成 GM。",
+        "你现在只为一个已被玩家选中的候选入口补全完整冒险包。",
+        "输出必须是单个 JSON 对象，不要 Markdown，不要解释，不要代码块。",
+        "JSON 顶层必须是 {\"adventure\": {...}}。",
+        "不要输出 title, playerSetupOptions, tags 或任何 id 字段；服务端会沿用已选候选的这些字段。",
+        "adventure 必须包含完整字段：pitch, openingScene, worldPremise, mainConflict, storyArc, winCondition, lossCondition, endingSeeds, endgameTriggers, factions, locations, npcSeeds, toneGuidelines, hiddenGmNotes, runtimePrompt。",
+        "storyArc.acts 必须包含 act1、act2、act3、act4、ending 五个阶段，每个阶段都有 title、goal、transitionHint。",
+        "endingSeeds 至少 2 个，locations 至少 1 个，npcSeeds 至少 1 个。",
+        "hiddenGmNotes 可以包含 GM 私有秘密，但 pitch、openingScene、worldPremise、runtimePrompt 不能直接泄露隐藏真相。",
+        "完整冒险必须严格承接 selectedConcept 的标题、teaser、玩家身份和标签。"
+      ].join("\n")
+    },
+    {
+      role: "user" as const,
+      content: JSON.stringify({
+        outputTemplate: {
+          adventure: {
+            pitch: "进入冒险后可展示的短介绍，不泄露隐藏真相。",
+            openingScene: "第一幕开场，直接给玩家可玩的局面。",
+            worldPremise: "公开世界观前提。",
+            mainConflict: "主线矛盾，只给 GM 使用。",
+            storyArc: {
+              acts: StoryActNameSchema.options
+                .filter((name) => name !== "epilogue")
+                .map((name) => ({
+                  name,
+                  title: "阶段标题",
+                  goal: "只给 GM 使用的阶段目标。",
+                  transitionHint: "进入下一阶段的提示。"
+                }))
+            },
+            winCondition: "完成这段冒险的条件，只给 GM 使用。",
+            lossCondition: "失败或坏结局条件，只给 GM 使用。",
+            endingSeeds: [
+              {
+                title: "代价中的胜利",
+                description: "一个可能结局方向。",
+                tone: "bittersweet"
+              },
+              {
+                title: "失控的余波",
+                description: "另一个可能结局方向。",
+                tone: "tragic"
+              }
+            ],
+            endgameTriggers: ["进入终局的触发条件。"],
+            factions: [
+              {
+                name: "关键阵营",
+                publicDescription: "玩家可见的阵营说明。",
+                hiddenAgenda: "GM 私有动机，可选。"
+              }
+            ],
+            locations: [
+              {
+                name: "关键地点",
+                description: "玩家可见的地点说明。"
+              }
+            ],
+            npcSeeds: [
+              {
+                name: "关键 NPC",
+                role: "NPC 角色定位",
+                publicDescription: "玩家可见的人物说明。",
+                privateMotivation: "GM 私有动机，可选。"
+              }
+            ],
+            toneGuidelines: "叙事风格规则。",
+            hiddenGmNotes: "只给 GM 的秘密、伏笔和真相。",
+            runtimePrompt: "后续游玩回合使用的稳定 GM 提示。"
+          }
+        },
+        request: {
+          dangerLevel: request.dangerLevel ?? "medium",
+          fantasyLevel: request.fantasyLevel ?? "medium",
+          playerRoleHint: request.playerRoleHint ?? null,
+          tone: request.tone ?? seed.defaultTone
+        },
+        allowedValues: {
+          endingTone: EndingSeedSchema.shape.tone.options,
+          storyActName: StoryActNameSchema.options.filter((name) => name !== "epilogue")
+        },
+        selectedConcept: concept,
+        worldSeed: seed
+      })
+    }
+  ];
+}
+
+function createAdventureCandidateConceptFromCandidate(
+  candidate: AdventureCandidate
+): AdventureCandidateConcept {
+  return AdventureCandidateConceptSchema.parse({
+    id: candidate.id,
+    requestId: candidate.requestId,
+    title: candidate.title,
+    teaser: buildSpoilerFreeCandidateTeaser(candidate),
+    playerSetupOptions: candidate.playerSetupOptions,
+    tags: candidate.tags
+  });
+}
+
+function buildAdventureCandidateConceptFromDraft(
+  seed: WorldSeedPreset,
+  requestId: string,
+  draft: AdventureCandidateConceptDraft,
+  index: number
+): AdventureCandidateConcept {
+  const candidateNumber = index + 1;
+  const candidatePrefix = `${seed.id}-preview-${candidateNumber}`;
+
+  return AdventureCandidateConceptSchema.parse({
+    ...draft,
+    id: `${candidatePrefix}-${crypto.randomUUID()}`,
+    requestId,
+    playerSetupOptions: draft.playerSetupOptions.map((option, optionIndex) => ({
+      ...option,
+      id: `${candidatePrefix}-player-${optionIndex + 1}`
+    })),
+    tags: Array.from(new Set([...draft.tags, seed.name]))
+  });
+}
+
 function buildAdventureCandidateFromDraft(
   seed: WorldSeedPreset,
   requestId: string,
@@ -654,6 +1297,45 @@ function buildAdventureCandidateFromDraft(
       id: `${candidatePrefix}-npc-${npcIndex + 1}`
     })),
     tags: Array.from(new Set([...draft.tags, seed.name]))
+  });
+}
+
+function buildAdventureCandidateFromDetailDraft(
+  seed: WorldSeedPreset,
+  concept: AdventureCandidateConcept,
+  draft: AdventureCandidateDetailDraft
+): AdventureCandidate {
+  return AdventureCandidateSchema.parse({
+    ...draft,
+    id: concept.id,
+    requestId: concept.requestId,
+    title: concept.title,
+    storyArc: {
+      acts: draft.storyArc.acts.map((act) => ({
+        ...act,
+        transitionHint:
+          act.transitionHint.trim() ||
+          (act.name === "ending" ? "保存结局摘要，并允许玩家查看后日谈。" : "进入下一阶段。")
+      }))
+    },
+    playerSetupOptions: concept.playerSetupOptions,
+    endingSeeds: draft.endingSeeds.map((ending, endingIndex) => ({
+      ...ending,
+      id: `${concept.id}-ending-${endingIndex + 1}`
+    })),
+    factions: draft.factions.map((faction, factionIndex) => ({
+      ...faction,
+      id: `${concept.id}-faction-${factionIndex + 1}`
+    })),
+    locations: draft.locations.map((location, locationIndex) => ({
+      ...location,
+      id: `${concept.id}-location-${locationIndex + 1}`
+    })),
+    npcSeeds: draft.npcSeeds.map((npc, npcIndex) => ({
+      ...npc,
+      id: `${concept.id}-npc-${npcIndex + 1}`
+    })),
+    tags: Array.from(new Set([...concept.tags, seed.name]))
   });
 }
 

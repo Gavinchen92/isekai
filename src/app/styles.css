@@ -180,6 +180,15 @@ h1 {
   padding: 8px 0 8px 18px;
 }
 
+.modal-loading-detail,
+.candidate-stage-note,
+.candidate-build-status {
+  color: #6f5a49;
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 8px 0 0;
+}
+
 .modal-actions {
   justify-content: flex-start;
   margin-top: 14px;
@@ -283,6 +292,17 @@ h1 {
   color: #865b2e;
   font-size: 13px;
   margin-bottom: 10px;
+}
+
+.candidate-stage-note {
+  border: 1px solid rgba(134, 91, 46, 0.22);
+  border-radius: 8px;
+  background: rgba(134, 91, 46, 0.08);
+  padding: 10px 12px;
+}
+
+.candidate-build-status {
+  color: #865b2e;
 }
 
 .candidate-card dl {

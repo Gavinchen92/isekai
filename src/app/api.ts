@@ -29,14 +29,16 @@ export async function fetchWorldSeeds(): Promise<readonly WorldSeedPreset[]> {
 }
 
 export async function generateAdventureCandidates(
-  worldSeedId: WorldSeedId
+  worldSeedId: WorldSeedId,
+  signal?: AbortSignal
 ): Promise<readonly AdventureCandidatePreview[]> {
   const response = await fetch("/api/adventure-candidates", {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ worldSeedId })
+    body: JSON.stringify({ worldSeedId }),
+    signal
   });
 
   if (!response.ok) {
@@ -49,7 +51,8 @@ export async function generateAdventureCandidates(
 export async function createAdventure(
   worldSeedId: WorldSeedId,
   candidateId: string,
-  selectedPlayerSetupId?: string
+  selectedPlayerSetupId?: string,
+  signal?: AbortSignal
 ): Promise<Adventure> {
   const requestBody: CreateAdventureRequest = selectedPlayerSetupId
     ? {
@@ -66,7 +69,8 @@ export async function createAdventure(
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(requestBody)
+    body: JSON.stringify(requestBody),
+    signal
   });
 
   if (!response.ok) {

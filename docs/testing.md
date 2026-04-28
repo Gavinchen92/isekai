@@ -27,16 +27,18 @@
 优先覆盖：
 
 - Adventure candidate schema。
-- Adventure candidate preview 只包含无剧透字段；API 不把完整候选、主线、结局、胜败条件、隐藏 GM notes 返回给前端。
+- Adventure candidate preview 只生成和返回无剧透字段；API 不把完整候选、主线、结局、胜败条件、隐藏 GM notes 返回给前端。
+- 真实 provider 的 preview 生成要按候选数量并发 fan-out，覆盖 partial failure、全部失败、重复重试和 preview-only temperature/thinking override。
+- 创建 Adventure 时才 materialize 完整候选，并且保留 preview 的 candidate id 和玩家身份 id。
 - Suggested moves 不能声明结果。
 - 玩家越权输入降级。
 - prompt / context builder。
 - 旅途见闻只展示玩家已知信息，不泄露隐藏 GM notes、章节、目标、胜败条件。
 - GM provider 的输出要先过 `GmTurnResult` schema；`internalStatePatch` 不能进入玩家可见的 turn response。
 - 推荐行动无论来自 mock 还是未来 AI，都只能表达尝试，不能表达已经成功的结果。
-- OpenAI-compatible provider 的测试只 mock HTTP，不调用真实外部服务；必须覆盖请求体、JSON 解析、错误上抛和 API key 不泄露。
+- OpenAI-compatible provider 的测试只 mock HTTP，不调用真实外部服务；必须覆盖请求体、JSON 解析、错误上抛、abort/timeout 和 API key 不泄露。
 - 用户意图识别 provider 的常规测试只 mock HTTP；真实模型分类只走 smoke。
-- API smoke：生成候选 -> 创建 Adventure -> 创建 Session -> 发送消息。
+- API smoke：生成 preview 候选 -> 选中候选并生成完整 Adventure -> 创建 Session -> 发送消息。
 
 ## 4. 命令
 

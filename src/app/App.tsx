@@ -94,6 +94,7 @@ export function App() {
     status: "selection"
   });
   const modalRequestIdRef = useRef(0);
+  const modalAbortControllerRef = useRef<AbortController | undefined>(undefined);
 
   useEffect(() => {
     if (playState.status === "active") {
@@ -125,16 +126,19 @@ export function App() {
   }, []);
 
   function handleBeginNewAdventure() {
+    abortModalRequest();
     modalRequestIdRef.current += 1;
     setNewAdventureModalState({ status: "selecting-seed" });
   }
 
   function handleCloseNewAdventure() {
+    abortModalRequest();
     modalRequestIdRef.current += 1;
     setNewAdventureModalState({ status: "closed" });
   }
 
   function handleReturnHome() {
+    abortModalRequest();
     modalRequestIdRef.current += 1;
     setPlayState({ status: "selection" });
     setNewAdventureModalState({ status: "closed" });
@@ -142,12 +146,14 @@ export function App() {
 
   async function handleSelectWorldSeed(seedId: WorldSeedId) {
     const requestId = modalRequestIdRef.current + 1;
+    const abortController = beginModalRequest();
+
     modalRequestIdRef.current = requestId;
 
     setNewAdventureModalState({ status: "generating-candidates", worldSeedId: seedId });
 
     try {
-      const candidates = await generateAdventureCandidates(seedId);
+      const candidates = await generateAdventureCandidates(seedId, abortController.signal);
 
       if (modalRequestIdRef.current !== requestId) {
         return;
@@ -164,12 +170,18 @@ export function App() {
         return;
       }
 
+      if (isAbortError(error)) {
+        return;
+      }
+
       const message = error instanceof Error ? error.message : "生成冒险候选失败";
       setNewAdventureModalState({
         status: "error",
         worldSeedId: seedId,
         message
       });
+    } finally {
+      clearModalRequest(abortController, requestId);
     }
   }
 
@@ -183,6 +195,8 @@ export function App() {
 
     const modalStateBeforeStart = newAdventureModalState;
     const requestId = modalRequestIdRef.current + 1;
+    const abortController = beginModalRequest();
+
     modalRequestIdRef.current = requestId;
 
     setNewAdventureModalState({
@@ -194,7 +208,8 @@ export function App() {
       const adventure = await createAdventure(
         modalStateBeforeStart.worldSeedId,
         candidate.id,
-        selectedPlayerSetupId
+        selectedPlayerSetupId,
+        abortController.signal
       );
       const session = await createSession(adventure.id);
 
@@ -213,15 +228,45 @@ export function App() {
         return;
       }
 
-      const message = error instanceof Error ? error.message : "创建冒险失败";
+      if (isAbortError(error)) {
+        return;
+      }
+
+      const detail = error instanceof Error ? error.message : "创建冒险失败";
       setNewAdventureModalState({
         ...modalStateBeforeStart,
         startAdventureState: {
           status: "error",
           candidateId: candidate.id,
-          message
+          message: `完整冒险包生成失败，可以重试当前候选或重新选择世界。${detail}`
         }
       });
+    } finally {
+      clearModalRequest(abortController, requestId);
+    }
+  }
+
+  function abortModalRequest() {
+    modalAbortControllerRef.current?.abort();
+    modalAbortControllerRef.current = undefined;
+  }
+
+  function beginModalRequest(): AbortController {
+    abortModalRequest();
+
+    const abortController = new AbortController();
+
+    modalAbortControllerRef.current = abortController;
+
+    return abortController;
+  }
+
+  function clearModalRequest(abortController: AbortController, requestId: number) {
+    if (
+      modalRequestIdRef.current === requestId &&
+      modalAbortControllerRef.current === abortController
+    ) {
+      modalAbortControllerRef.current = undefined;
     }
   }
 
@@ -319,7 +364,10 @@ function NewAdventureModal({
         {modalState.status === "generating-candidates" ? (
           <div className="modal-loading" aria-live="polite">
             <p className="muted">
-              正在为{selectedSeed ? `「${selectedSeed.name}」` : "这个世界"}生成冒险候选...
+              正在为{selectedSeed ? `「${selectedSeed.name}」` : "这个世界"}构思冒险入口...
+            </p>
+            <p className="modal-loading-detail">
+              这里只生成无剧透候选卡片，完整冒险包会在你选中后再构建。
             </p>
           </div>
         ) : null}
@@ -435,9 +483,14 @@ function CandidateSelection({
         <p className="error">{modalState.startAdventureState.message}</p>
       ) : null}
 
+      <p className="candidate-stage-note">
+        这些是无剧透入口。选择后才会生成完整冒险包，可能需要几十秒。
+      </p>
+
       <div className="candidate-grid">
         {modalState.candidates.map((candidate) => {
           const selectedPlayerSetupId = getSelectedPlayerSetupId(candidate);
+          const isStarting = modalState.startAdventureState.status === "loading";
           const isStartingThisCandidate =
             modalState.startAdventureState.status === "loading" &&
             modalState.startAdventureState.candidateId === candidate.id;
@@ -453,7 +506,7 @@ function CandidateSelection({
                   <label className="setup-option" key={option.id}>
                     <input
                       checked={selectedPlayerSetupId === option.id}
-                      disabled={modalState.startAdventureState.status === "loading"}
+                      disabled={isStarting}
                       name={`player-setup-${candidate.id}`}
                       type="radio"
                       value={option.id}
@@ -469,11 +522,16 @@ function CandidateSelection({
               <button
                 type="button"
                 className="card-action"
-                disabled={isStartingThisCandidate || !selectedPlayerSetupId}
+                disabled={isStarting || !selectedPlayerSetupId}
                 onClick={() => onStartAdventure(candidate, selectedPlayerSetupId)}
               >
-                {isStartingThisCandidate ? "进入中..." : "开始这个冒险"}
+                {isStartingThisCandidate ? "构建中..." : "开始这个冒险"}
               </button>
+              {isStartingThisCandidate ? (
+                <p className="candidate-build-status" aria-live="polite">
+                  正在构建完整冒险包，可能需要几十秒...
+                </p>
+              ) : null}
             </article>
           );
         })}
@@ -984,6 +1042,15 @@ function findWorldSeed(
   }
 
   return worldSeedsState.seeds.find((seed) => seed.id === seedId);
+}
+
+function isAbortError(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "name" in error &&
+      (error as { name: unknown }).name === "AbortError"
+  );
 }
 
 function syncScrollPageToTop(): (() => void) | undefined {

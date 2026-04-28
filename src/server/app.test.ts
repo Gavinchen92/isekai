@@ -10,6 +10,7 @@ import {
   WorldSeedPresetListSchema
 } from "../domain";
 import { HealthResponseSchema } from "../shared/health";
+import * as adventureService from "../services/adventures";
 import * as journeyMemoryService from "../services/journey-memory";
 import { createServer } from "./app";
 
@@ -214,6 +215,28 @@ describe("POST /api/adventures", () => {
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({
       error: "Player setup option does not belong to adventure candidate"
+    });
+  });
+
+  it("returns bad gateway when full adventure generation fails", async () => {
+    vi.spyOn(adventureService, "createAdventure").mockRejectedValue(
+      new Error("upstream model failed")
+    );
+    const server = createServer();
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/adventures",
+      payload: {
+        candidateId: "candidate-1",
+        worldSeedId: "isekai"
+      }
+    });
+
+    await server.close();
+
+    expect(response.statusCode).toBe(502);
+    expect(response.json()).toEqual({
+      error: "Adventure generation failed"
     });
   });
 });

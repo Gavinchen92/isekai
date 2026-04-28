@@ -1,5 +1,5 @@
 import cors from "@fastify/cors";
-import fastify from "fastify";
+import fastify, { type FastifyReply } from "fastify";
 import {
   AdventureCandidateGenerationRequestSchema,
   CreateAdventureRequestSchema,
@@ -49,7 +49,9 @@ export function createServer() {
     );
 
     try {
-      const candidates = await generateAdventureCandidatePreviews(parsedRequest.data);
+      const candidates = await generateAdventureCandidatePreviews(parsedRequest.data, {
+        signal: createReplyAbortSignal(reply)
+      });
 
       request.log.info(
         {
@@ -65,6 +67,12 @@ export function createServer() {
 
       return candidates;
     } catch (error: unknown) {
+      if (isAbortError(error)) {
+        return reply.status(499).send({
+          error: "Adventure candidate generation cancelled"
+        });
+      }
+
       request.log.error(
         {
           durationMs: getDurationMs(),
@@ -93,7 +101,9 @@ export function createServer() {
     }
 
     try {
-      return createAdventure(parsedRequest.data);
+      return await createAdventure(parsedRequest.data, {
+        signal: createReplyAbortSignal(reply)
+      });
     } catch (error: unknown) {
       if (error instanceof Error && error.message.includes("adventure candidate not found")) {
         return reply.status(404).send({
@@ -119,7 +129,25 @@ export function createServer() {
         });
       }
 
-      throw error;
+      if (isAbortError(error)) {
+        return reply.status(499).send({
+          error: "Adventure generation cancelled"
+        });
+      }
+
+      request.log.error(
+        {
+          err: error,
+          event: "adventure_generation_failed",
+          requestId: request.id,
+          worldSeedId: parsedRequest.data.worldSeedId
+        },
+        "adventure_generation_failed"
+      );
+
+      return reply.status(502).send({
+        error: "Adventure generation failed"
+      });
     }
   });
   server.post("/api/sessions", async (request, reply) => {
@@ -330,4 +358,25 @@ export function createServer() {
   });
 
   return server;
+}
+
+function createReplyAbortSignal(reply: FastifyReply): AbortSignal {
+  const controller = new AbortController();
+
+  reply.raw.once("close", () => {
+    if (!reply.raw.writableEnded) {
+      controller.abort(new DOMException("client disconnected", "AbortError"));
+    }
+  });
+
+  return controller.signal;
+}
+
+function isAbortError(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "name" in error &&
+      (error as { name: unknown }).name === "AbortError"
+  );
 }

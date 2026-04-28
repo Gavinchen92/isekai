@@ -155,8 +155,51 @@ afterEach(() => {
 });
 
 describe("App", () => {
+  it("aborts candidate generation when the modal closes", async () => {
+    let candidateSignal: AbortSignal | undefined;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const requestUrl =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (requestUrl === "/api/world-seeds") {
+        return Promise.resolve(
+          new Response(JSON.stringify(worldSeeds), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          })
+        );
+      }
+
+      if (requestUrl === "/api/adventure-candidates" && init?.method === "POST") {
+        candidateSignal = init.signal ?? undefined;
+
+        return new Promise<Response>(() => {
+          // keep request pending until the UI aborts it
+        });
+      }
+
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+
+    render(<App />);
+
+    await userEvent.click(screen.getByRole("button", { name: "开始新冒险" }));
+    expect(await screen.findByRole("heading", { name: "异世界" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getAllByRole("button", { name: "选择这个世界" })[0]!);
+    expect(await screen.findByText(/构思冒险入口/u)).toBeInTheDocument();
+    expect(candidateSignal?.aborted).toBe(false);
+
+    await userEvent.click(screen.getByRole("button", { name: "关闭" }));
+
+    expect(candidateSignal?.aborted).toBe(true);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("starts a new adventure from a world seed modal", async () => {
     let resolveCandidateRequest: ((response: Response) => void) | undefined;
+    let resolveAdventureRequest: ((response: Response) => void) | undefined;
     let journeyMemoryEntries: unknown[] = [
       {
         id: "session-1-identity-wanderer",
@@ -227,24 +270,9 @@ describe("App", () => {
         expect(String(init.body)).not.toContain("hiddenGmNotes");
         expect(String(init.body)).not.toContain("mainConflict");
 
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              ...candidates[0],
-              id: "adventure-1",
-              sourceCandidateId: candidates[0]?.id,
-              worldSeedId: "isekai",
-              currentAct: "act1",
-              selectedPlayerSetupId: "insider",
-              createdAt: "2026-04-27T00:00:00.000Z",
-              updatedAt: "2026-04-27T00:00:00.000Z"
-            }),
-            {
-              status: 200,
-              headers: { "Content-Type": "application/json" }
-            }
-          )
-        );
+        return new Promise<Response>((resolve) => {
+          resolveAdventureRequest = resolve;
+        });
       }
 
       if (requestUrl === "/api/sessions" && init?.method === "POST") {
@@ -346,7 +374,10 @@ describe("App", () => {
     await userEvent.click(screen.getAllByRole("button", { name: "选择这个世界" })[0]!);
 
     expect(screen.queryByRole("button", { name: "生成冒险候选" })).not.toBeInTheDocument();
-    expect(await screen.findByText("正在为「异世界」生成冒险候选...")).toBeInTheDocument();
+    expect(await screen.findByText(/正在为.*构思冒险入口/u)).toBeInTheDocument();
+    expect(
+      screen.getByText("这里只生成无剧透候选卡片，完整冒险包会在你选中后再构建。")
+    ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/adventure-candidates",
       expect.objectContaining({
@@ -364,6 +395,9 @@ describe("App", () => {
     expect(await screen.findByRole("dialog", { name: "选择冒险候选" })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "断塔召唤" })).toBeInTheDocument();
     expect(screen.getByText(candidatePreviews[0]!.teaser)).toBeInTheDocument();
+    expect(
+      screen.getByText("这些是无剧透入口。选择后才会生成完整冒险包，可能需要几十秒。")
+    ).toBeInTheDocument();
     expect(screen.queryByText("银色符文在脚下熄灭。")).not.toBeInTheDocument();
     expect(screen.queryByText("召唤事故释放旧封印。")).not.toBeInTheDocument();
 
@@ -375,6 +409,28 @@ describe("App", () => {
     expect(selectedIdentityOption).toBeChecked();
 
     await userEvent.click(screen.getByRole("button", { name: "开始这个冒险" }));
+
+    expect(await screen.findByRole("button", { name: "构建中..." })).toBeDisabled();
+    expect(screen.getByText("正在构建完整冒险包，可能需要几十秒...")).toBeInTheDocument();
+
+    resolveAdventureRequest?.(
+      new Response(
+        JSON.stringify({
+          ...candidates[0],
+          id: "adventure-1",
+          sourceCandidateId: candidates[0]?.id,
+          worldSeedId: "isekai",
+          currentAct: "act1",
+          selectedPlayerSetupId: "insider",
+          createdAt: "2026-04-27T00:00:00.000Z",
+          updatedAt: "2026-04-27T00:00:00.000Z"
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        }
+      )
+    );
 
     expect(await screen.findByRole("heading", { name: "你要怎么做？" })).toBeInTheDocument();
     expect(screen.getByText("银色符文在脚下熄灭。")).toBeInTheDocument();

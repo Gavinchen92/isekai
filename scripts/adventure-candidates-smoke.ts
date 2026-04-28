@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { generateAdventureCandidates } from "../src/services/adventure-candidates";
+import { generateAdventureCandidatePreviews } from "../src/services/adventure-candidates";
+import { createAdventure } from "../src/services/adventures";
 
 const envPath = resolve(process.cwd(), ".env");
 
@@ -28,21 +29,34 @@ console.log(
   )
 );
 
-const candidates = await generateAdventureCandidates({
+const previews = await generateAdventureCandidatePreviews({
   candidateCount: 3,
+  worldSeedId: "isekai"
+});
+const [selectedPreview] = previews;
+
+if (!selectedPreview) {
+  throw new Error("candidate preview smoke did not return any previews");
+}
+
+const adventure = await createAdventure({
+  candidateId: selectedPreview.id,
   worldSeedId: "isekai"
 });
 
 console.log("Adventure candidate smoke result:");
 console.log(
   JSON.stringify(
-    candidates.map((candidate) => ({
-      endings: candidate.endingSeeds.map((ending) => ending.title),
-      openingScene: candidate.openingScene.slice(0, 120),
-      pitch: candidate.pitch,
-      tags: candidate.tags,
-      title: candidate.title
-    })),
+    {
+      materializedAdventure: {
+        endings: adventure.endingSeeds.map((ending) => ending.title),
+        openingScene: adventure.openingScene.slice(0, 120),
+        pitch: adventure.pitch,
+        tags: adventure.tags,
+        title: adventure.title
+      },
+      previews
+    },
     null,
     2
   )

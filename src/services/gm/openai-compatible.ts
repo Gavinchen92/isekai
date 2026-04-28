@@ -10,6 +10,8 @@ const OpenAiCompatibleProviderConfigSchema = z.object({
   timeoutMs: z.coerce.number().int().min(1_000).max(120_000).default(60_000)
 });
 
+const OpenAiCompatibleThinkingModeSchema = z.enum(["enabled", "disabled"]);
+
 const OpenAiCompatibleChatCompletionResponseSchema = z.object({
   choices: z
     .array(
@@ -26,6 +28,7 @@ export type OpenAiCompatibleProviderConfigInput = z.input<
   typeof OpenAiCompatibleProviderConfigSchema
 >;
 export type OpenAiCompatibleProviderConfig = z.infer<typeof OpenAiCompatibleProviderConfigSchema>;
+export type OpenAiCompatibleThinkingMode = z.infer<typeof OpenAiCompatibleThinkingModeSchema>;
 
 export function resolveOpenAiCompatibleProviderConfig(
   configInput: Partial<OpenAiCompatibleProviderConfigInput> = {}
@@ -65,17 +68,33 @@ export async function requestOpenAiCompatibleJsonObject(input: {
   config: OpenAiCompatibleProviderConfig;
   label: string;
   messages: readonly GmPromptMessage[];
+  signal?: AbortSignal;
+  temperature?: number;
+  thinking?: OpenAiCompatibleThinkingMode;
 }): Promise<string> {
   const getDurationMs = createLogTimer();
   const url = buildChatCompletionsUrl(input.config.baseUrl);
-  const payload = {
+  const temperature = input.temperature ?? input.config.temperature;
+  const payload: {
+    messages: readonly GmPromptMessage[];
+    model: string;
+    response_format: { type: "json_object" };
+    temperature: number;
+    thinking?: { type: OpenAiCompatibleThinkingMode };
+  } = {
     messages: input.messages,
     model: input.config.model,
     response_format: {
       type: "json_object"
     },
-    temperature: input.config.temperature
+    temperature
   };
+
+  if (input.thinking) {
+    payload.thinking = {
+      type: input.thinking
+    };
+  }
   const payloadFields = appLogConfig.logLlmPayloads
     ? {
         promptPreview: truncateForLog(JSON.stringify(input.messages))
@@ -87,22 +106,29 @@ export async function requestOpenAiCompatibleJsonObject(input: {
     label: input.label,
     model: input.config.model,
     provider: "openai-compatible",
+    temperature,
+    thinking: input.thinking,
     timeoutMs: input.config.timeoutMs,
     ...payloadFields
   });
 
   let response: Response;
+  let responseText: string;
 
   try {
-    response = await fetchWithTimeout(url, {
+    const result = await fetchTextWithTimeout(url, {
       body: JSON.stringify(payload),
       headers: {
         authorization: `Bearer ${input.config.apiKey}`,
         "content-type": "application/json"
       },
       method: "POST",
+      signal: input.signal,
       timeoutMs: input.config.timeoutMs
     });
+
+    response = result.response;
+    responseText = result.text;
   } catch (error: unknown) {
     logEvent(
       "llm_request_failed",
@@ -119,7 +145,7 @@ export async function requestOpenAiCompatibleJsonObject(input: {
   }
 
   if (!response.ok) {
-    const errorBody = trimErrorBody(await response.text());
+    const errorBody = trimErrorBody(responseText);
 
     logEvent(
       "llm_request_failed",
@@ -136,7 +162,7 @@ export async function requestOpenAiCompatibleJsonObject(input: {
     throw new Error(`${input.label} request failed with ${response.status}: ${errorBody}`);
   }
 
-  const payloadJson = OpenAiCompatibleChatCompletionResponseSchema.parse(await response.json());
+  const payloadJson = OpenAiCompatibleChatCompletionResponseSchema.parse(JSON.parse(responseText));
   const content = payloadJson.choices[0]?.message.content;
 
   if (!content) {
@@ -169,6 +195,7 @@ export async function* requestOpenAiCompatibleJsonObjectStream(input: {
   config: OpenAiCompatibleProviderConfig;
   label: string;
   messages: readonly GmPromptMessage[];
+  signal?: AbortSignal;
 }): AsyncGenerator<string> {
   // 过渡阶段：如果 provider 尚未启用原生流式，这里退化为单块输出。
   // 上层仍可按阶段事件向前端推送，后续可替换为真实 token 流式解析。
@@ -179,24 +206,41 @@ function buildChatCompletionsUrl(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/u, "")}/chat/completions`;
 }
 
-async function fetchWithTimeout(
+async function fetchTextWithTimeout(
   url: string,
   init: RequestInit & {
+    signal?: AbortSignal;
     timeoutMs: number;
   }
-): Promise<Response> {
+): Promise<{ response: Response; text: string }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => {
-    controller.abort();
+    controller.abort(new DOMException("OpenAI-compatible request timed out", "AbortError"));
   }, init.timeoutMs);
+  const abortFromParent = () => {
+    controller.abort(init.signal?.reason);
+  };
+
+  if (init.signal?.aborted) {
+    controller.abort(init.signal.reason);
+  } else {
+    init.signal?.addEventListener("abort", abortFromParent, {
+      once: true
+    });
+  }
 
   try {
-    return await fetch(url, {
-      ...init,
+    const { signal: _signal, timeoutMs: _timeoutMs, ...fetchInit } = init;
+    const response = await fetch(url, {
+      ...fetchInit,
       signal: controller.signal
     });
+    const text = await response.text();
+
+    return { response, text };
   } finally {
     clearTimeout(timeout);
+    init.signal?.removeEventListener("abort", abortFromParent);
   }
 }
 

@@ -5,15 +5,27 @@ import {
   type AdventureCandidate,
   type CreateAdventureRequest
 } from "../domain";
-import { getStoredAdventureCandidate } from "./adventure-candidates";
+import { getStoredAdventureCandidate, materializeAdventureCandidate } from "./adventure-candidates";
 
 const adventures = new Map<string, Adventure>();
+
+type CreateAdventureOptions = {
+  signal?: AbortSignal;
+};
+
+type PlayerSetupOwner = {
+  id: string;
+  playerSetupOptions: readonly { id: string }[];
+};
 
 function createId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
 }
 
-export function createAdventure(rawRequest: unknown): Adventure {
+export async function createAdventure(
+  rawRequest: unknown,
+  options: CreateAdventureOptions = {}
+): Promise<Adventure> {
   const request: CreateAdventureRequest = CreateAdventureRequestSchema.parse(rawRequest);
   const storedCandidate = getStoredAdventureCandidate(request.candidateId);
 
@@ -25,8 +37,16 @@ export function createAdventure(rawRequest: unknown): Adventure {
     throw new Error(`adventure candidate does not belong to world seed: ${request.worldSeedId}`);
   }
 
+  resolveSelectedPlayerSetupId(storedCandidate.concept, request.selectedPlayerSetupId);
+
+  const materializedCandidate = await materializeAdventureCandidate(request.candidateId, options);
+
+  if (!materializedCandidate?.candidate) {
+    throw new Error(`adventure candidate not found: ${request.candidateId}`);
+  }
+
   return createAdventureFromCandidate({
-    candidate: storedCandidate.candidate,
+    candidate: materializedCandidate.candidate,
     selectedPlayerSetupId: request.selectedPlayerSetupId,
     worldSeedId: request.worldSeedId
   });
@@ -63,7 +83,7 @@ export function getAdventure(adventureId: string): Adventure | undefined {
 }
 
 function resolveSelectedPlayerSetupId(
-  candidate: AdventureCandidate,
+  candidate: PlayerSetupOwner,
   selectedPlayerSetupId?: string
 ): string {
   const resolvedPlayerSetupId = selectedPlayerSetupId ?? candidate.playerSetupOptions[0]?.id;
