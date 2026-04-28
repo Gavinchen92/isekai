@@ -1,0 +1,12 @@
+node_modules/
+.pnpm-store/
+dist/
+.vite/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+data/*.sqlite
+data/*.sqlite-*
+data/logs/

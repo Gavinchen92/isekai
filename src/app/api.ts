@@ -1,0 +1,109 @@
+import {
+  AdventureSchema,
+  AdventureCandidatePreviewListSchema,
+  JourneyMemoryEntryListSchema,
+  SessionSchema,
+  TurnResponseSchema,
+  type Adventure,
+  type AdventureCandidatePreview,
+  type JourneyMemoryEntry,
+  type MessageInputKind,
+  type Session,
+  type TurnResponse,
+  WorldSeedPresetListSchema,
+  type WorldSeedId,
+  type WorldSeedPreset
+} from "../domain";
+
+export async function fetchWorldSeeds(): Promise<readonly WorldSeedPreset[]> {
+  const response = await fetch("/api/world-seeds");
+
+  if (!response.ok) {
+    throw new Error(`fetch world seeds failed: ${response.status}`);
+  }
+
+  return WorldSeedPresetListSchema.parse(await response.json());
+}
+
+export async function generateAdventureCandidates(
+  worldSeedId: WorldSeedId
+): Promise<readonly AdventureCandidatePreview[]> {
+  const response = await fetch("/api/adventure-candidates", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ worldSeedId })
+  });
+
+  if (!response.ok) {
+    throw new Error(`generate adventure candidates failed: ${response.status}`);
+  }
+
+  return AdventureCandidatePreviewListSchema.parse(await response.json());
+}
+
+export async function createAdventure(
+  worldSeedId: WorldSeedId,
+  candidateId: string
+): Promise<Adventure> {
+  const response = await fetch("/api/adventures", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ worldSeedId, candidateId })
+  });
+
+  if (!response.ok) {
+    throw new Error(`create adventure failed: ${response.status}`);
+  }
+
+  return AdventureSchema.parse(await response.json());
+}
+
+export async function createSession(adventureId: string): Promise<Session> {
+  const response = await fetch("/api/sessions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ adventureId })
+  });
+
+  if (!response.ok) {
+    throw new Error(`create session failed: ${response.status}`);
+  }
+
+  return SessionSchema.parse(await response.json());
+}
+
+export async function fetchJourneyMemory(sessionId: string): Promise<readonly JourneyMemoryEntry[]> {
+  const response = await fetch(`/api/sessions/${sessionId}/journey-memory`);
+
+  if (!response.ok) {
+    throw new Error(`fetch journey memory failed: ${response.status}`);
+  }
+
+  return JourneyMemoryEntryListSchema.parse(await response.json());
+}
+
+export async function submitTurn(
+  sessionId: string,
+  content: string,
+  inputKind: MessageInputKind = "free"
+): Promise<TurnResponse> {
+  const response = await fetch("/api/turns", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ sessionId, content, inputKind })
+  });
+
+  if (!response.ok) {
+    throw new Error(`submit turn failed: ${response.status}`);
+  }
+
+  return TurnResponseSchema.parse(await response.json());
+}
