@@ -13,18 +13,37 @@ import {
 import { getAdventure } from "./adventures";
 import { getGmProvider, type GmUserMessage } from "./gm/provider";
 import { classifyPlayerInput } from "./input-intent";
-import { extractJourneyMemoryFromTurn, listJourneyMemory } from "./journey-memory";
+import * as journeyMemoryService from "./journey-memory";
 import { getSession } from "./sessions";
 
 const messagesBySession = new Map<string, Message[]>();
 const suggestedMovesBySession = new Map<string, SuggestedMove[]>();
 const gmInternalStatePatchesBySession = new Map<string, GmInternalStatePatch[]>();
+const journeyMemoryPostProcessBySession = new Map<string, Promise<unknown>>();
+
+export type TurnPostProcessResult =
+  | {
+      durationMs: number;
+      status: "completed";
+    }
+  | {
+      durationMs: number;
+      error: unknown;
+      status: "failed";
+    };
+
+type CreateTurnOptions = {
+  onJourneyMemoryPostProcessSettled?: (result: TurnPostProcessResult) => void;
+};
 
 function createId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
 }
 
-export async function createTurn(rawRequest: unknown): Promise<TurnResponse> {
+export async function createTurn(
+  rawRequest: unknown,
+  options: CreateTurnOptions = {}
+): Promise<TurnResponse> {
   const request: CreateTurnRequest = CreateTurnRequestSchema.parse(rawRequest);
   const session = getSession(request.sessionId);
 
@@ -69,7 +88,7 @@ export async function createTurn(rawRequest: unknown): Promise<TurnResponse> {
     adventure,
     session,
     userMessage,
-    journeyMemory: listJourneyMemory(session.id),
+    journeyMemory: journeyMemoryService.listJourneyMemory(session.id),
     messageHistory,
     previousInternalStatePatches,
     previousSuggestedMoves
@@ -94,11 +113,28 @@ export async function createTurn(rawRequest: unknown): Promise<TurnResponse> {
     ...(gmInternalStatePatchesBySession.get(session.id) ?? []),
     gmResult.internalStatePatch
   ]);
-  extractJourneyMemoryFromTurn(session.id, {
-    adventure,
-    assistantMessage,
-    memoryCandidates: gmResult.journeyMemoryCandidates,
-    userMessage
+  const journeyMemoryPostProcessStartedAt = performance.now();
+  void enqueueJourneyMemoryPostProcess(session.id, async () => {
+    journeyMemoryService.extractJourneyMemoryFromTurn(session.id, {
+      adventure,
+      assistantMessage,
+      memoryCandidates: gmResult.journeyMemoryCandidates,
+      userMessage
+    });
+  }).then((error) => {
+    if (!error) {
+      options.onJourneyMemoryPostProcessSettled?.({
+        durationMs: Math.round(performance.now() - journeyMemoryPostProcessStartedAt),
+        status: "completed"
+      });
+      return;
+    }
+
+    options.onJourneyMemoryPostProcessSettled?.({
+      durationMs: Math.round(performance.now() - journeyMemoryPostProcessStartedAt),
+      error,
+      status: "failed"
+    });
   });
 
   return TurnResponseSchema.parse({
@@ -143,7 +179,7 @@ export function refreshJourneyMemoryForSession(sessionId: string) {
       userMessage.inferredIntent &&
       assistantMessage?.role === "assistant"
     ) {
-      extractJourneyMemoryFromTurn(session.id, {
+      journeyMemoryService.extractJourneyMemoryFromTurn(session.id, {
         adventure,
         assistantMessage,
         userMessage
@@ -151,7 +187,42 @@ export function refreshJourneyMemoryForSession(sessionId: string) {
     }
   }
 
-  return listJourneyMemory(sessionId);
+  return journeyMemoryService.listJourneyMemory(sessionId);
+}
+
+export function waitForTurnPostProcessing(sessionId: string): Promise<void> {
+  return (journeyMemoryPostProcessBySession.get(sessionId) ?? Promise.resolve()).then(
+    () => undefined
+  );
+}
+
+function enqueueJourneyMemoryPostProcess(
+  sessionId: string,
+  task: () => void | Promise<void>
+): Promise<unknown> {
+  const previousTask = journeyMemoryPostProcessBySession.get(sessionId) ?? Promise.resolve();
+  const nextTask = previousTask
+    .then(
+      () =>
+        new Promise<unknown>((resolve) => {
+          queueMicrotask(() => {
+            Promise.resolve(task())
+              .then(() => resolve(undefined))
+              .catch((error: unknown) => resolve(error));
+          });
+        })
+    );
+
+  journeyMemoryPostProcessBySession.set(
+    sessionId,
+    nextTask.finally(() => {
+      if (journeyMemoryPostProcessBySession.get(sessionId) === nextTask) {
+        journeyMemoryPostProcessBySession.delete(sessionId);
+      }
+    })
+  );
+
+  return nextTask;
 }
 
 function buildSuggestedMovesFromGmResult(

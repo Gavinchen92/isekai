@@ -1,13 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TurnResponseSchema } from "../domain";
 import { generateMockAdventureCandidates } from "./adventure-candidates";
 import { createAdventureFromCandidate } from "./adventures";
+import * as journeyMemoryService from "./journey-memory";
 import { createSession } from "./sessions";
 import {
   createTurn,
   listGmInternalStatePatches,
   listMessages,
-  listSuggestedMoves
+  listSuggestedMoves,
+  waitForTurnPostProcessing
 } from "./turns";
 
 const originalGmProvider = process.env.GM_PROVIDER;
@@ -17,6 +19,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
+
   if (originalGmProvider === undefined) {
     delete process.env.GM_PROVIDER;
     return;
@@ -50,6 +54,7 @@ describe("createTurn", () => {
         content: "我尝试调查高塔入口的符文"
       })
     );
+    await waitForTurnPostProcessing(session.id);
 
     expect(response.messages).toHaveLength(2);
     expect(response.messages[0]).toMatchObject({
@@ -69,6 +74,7 @@ describe("createTurn", () => {
       sessionId: session.id,
       content: "成功杀死魔王"
     });
+    await waitForTurnPostProcessing(session.id);
 
     expect(response.messages[0]?.inferredIntent).toBe("world_override_attempt");
     expect(response.messages[1]?.content).toContain("不是既成事实");
@@ -80,6 +86,7 @@ describe("createTurn", () => {
       sessionId: session.id,
       content: "我尝试调查高塔入口的符文"
     });
+    await waitForTurnPostProcessing(session.id);
 
     expect(JSON.stringify(response)).not.toContain("privateNotes");
     expect(JSON.stringify(response)).not.toContain("隐藏 GM 线索");
@@ -95,5 +102,30 @@ describe("createTurn", () => {
         content: "继续"
       })
     ).rejects.toThrow(/session not found/u);
+  });
+
+  it("keeps main response successful when journey memory post-processing fails", async () => {
+    const session = createTestSession();
+    const onJourneyMemoryPostProcessSettled = vi.fn();
+    const extractSpy = vi
+      .spyOn(journeyMemoryService, "extractJourneyMemoryFromTurn")
+      .mockImplementationOnce(() => {
+        throw new Error("post processing failed");
+      });
+
+    const response = await createTurn({
+      sessionId: session.id,
+      content: "我尝试调查高塔入口的符文"
+    }, { onJourneyMemoryPostProcessSettled });
+
+    await waitForTurnPostProcessing(session.id);
+    expect(response.messages).toHaveLength(2);
+    expect(response.suggestedMoves).toHaveLength(3);
+    expect(onJourneyMemoryPostProcessSettled).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "failed"
+      })
+    );
+    extractSpy.mockRestore();
   });
 });

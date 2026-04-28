@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { generateMockAdventureCandidates } from "./adventure-candidates";
 import { createAdventureFromCandidate } from "./adventures";
 import { createSession } from "./sessions";
-import { createTurn } from "./turns";
+import { createTurn, waitForTurnPostProcessing } from "./turns";
 import { listJourneyMemory } from "./journey-memory";
 
 function createTestSession() {
@@ -45,6 +45,7 @@ describe("journey memory", () => {
       sessionId: session.id,
       content: "我尝试调查高塔入口的符文"
     });
+    await waitForTurnPostProcessing(session.id);
 
     const clueEntries = listJourneyMemory(session.id).filter((entry) => entry.type === "clue");
 
@@ -62,6 +63,7 @@ describe("journey memory", () => {
       sessionId: session.id,
       content: "成功杀死魔王并让所有人臣服"
     });
+    await waitForTurnPostProcessing(session.id);
 
     expect(listJourneyMemory(session.id).some((entry) => entry.type === "clue")).toBe(false);
   });
@@ -73,10 +75,12 @@ describe("journey memory", () => {
       sessionId: session.id,
       content: "我尝试调查高塔入口的符文"
     });
+    await waitForTurnPostProcessing(session.id);
     await createTurn({
       sessionId: session.id,
       content: "我继续调查高塔入口的脚印"
     });
+    await waitForTurnPostProcessing(session.id);
 
     const clueEntries = listJourneyMemory(session.id).filter((entry) => entry.type === "clue");
 
@@ -91,11 +95,13 @@ describe("journey memory", () => {
       sessionId: session.id,
       content: "我问莉瑟是否愿意相信我"
     });
+    await waitForTurnPostProcessing(session.id);
     await createTurn({
       sessionId: session.id,
       content: "/ooc 莉瑟不是信任我，她只是暂时愿意回应",
       inputKind: "ooc"
     });
+    await waitForTurnPostProcessing(session.id);
 
     const relationshipEntries = listJourneyMemory(session.id).filter(
       (entry) => entry.type === "relationship"
