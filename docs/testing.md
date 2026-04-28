@@ -12,8 +12,9 @@
 - UI 组件测试：React Testing Library + jsdom，只测用户能看到和操作的行为。
 - 类型检查：`tsc --noEmit`，通过 `pnpm lint` 执行。
 - 构建验证：`pnpm build`，确保前端产物能生成。
+- E2E smoke：Playwright + Chromium，只覆盖真实浏览器下的关键玩家路径。
 
-暂不引入 Playwright。等有“选择世界种子 -> 生成冒险 -> 开始游玩”的真实流程后，再加端到端测试。
+Playwright 只作为薄 smoke 层，不复制 domain / service / API / RTL 已经覆盖的分支。E2E 默认使用 `GM_PROVIDER=mock` 和临时测试数据库，不调用真实模型，也不写入本地默认存档。
 
 ## 2. 命名约定
 
@@ -21,6 +22,7 @@
 - 文件名使用 `*.test.ts` 或 `*.test.tsx`。
 - UI 测试文件顶部加 `// @vitest-environment jsdom`。
 - API 测试只通过 Fastify `inject()` 调 route。
+- E2E 测试放在 `tests/e2e/`，文件名使用 `*.spec.ts`。
 
 ## 3. 必测链路
 
@@ -44,6 +46,8 @@
 
 ```bash
 pnpm test
+pnpm test:e2e
+pnpm test:e2e:ui
 pnpm test:watch
 pnpm test:coverage
 pnpm lint
@@ -60,3 +64,4 @@ pnpm build
 - `src/services/gm/*.test.ts`：context builder、mock provider、OpenAI-compatible provider 测试。
 - `src/server/app.test.ts`：Fastify API route 测试。
 - `src/app/App.test.tsx`：新冒险入口、候选选择、游玩页和旅途见闻 UI 测试。
+- `tests/e2e/new-adventure.spec.ts`：真实浏览器下的新冒险、回合提交、旅途见闻和继续冒险 smoke 测试。
