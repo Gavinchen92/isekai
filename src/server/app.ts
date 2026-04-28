@@ -184,11 +184,37 @@ export function createServer() {
     );
 
     try {
-      const turn = await createTurn(parsedRequest.data);
+      const turn = await createTurn(parsedRequest.data, {
+        onJourneyMemoryPostProcessSettled: (result) => {
+          if (result.status === "completed") {
+            request.log.info(
+              {
+                durationMs: result.durationMs,
+                event: "turn_post_processing_completed",
+                requestId: request.id,
+                sessionId: parsedRequest.data.sessionId
+              },
+              "turn_post_processing_completed"
+            );
+            return;
+          }
+
+          request.log.error(
+            {
+              durationMs: result.durationMs,
+              err: result.error,
+              event: "turn_post_processing_failed",
+              requestId: request.id,
+              sessionId: parsedRequest.data.sessionId
+            },
+            "turn_post_processing_failed"
+          );
+        }
+      });
 
       request.log.info(
         {
-          durationMs: getDurationMs(),
+          mainResponseDurationMs: getDurationMs(),
           event: "turn_generation_completed",
           messageCount: turn.messages.length,
           requestId: request.id,

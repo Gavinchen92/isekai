@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AdventureCandidatePreviewListSchema,
   AdventureSchema,
@@ -9,7 +9,12 @@ import {
   WorldSeedPresetListSchema
 } from "../domain";
 import { HealthResponseSchema } from "../shared/health";
+import * as journeyMemoryService from "../services/journey-memory";
 import { createServer } from "./app";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 async function createAdventureFromGeneratedCandidate(
   server: ReturnType<typeof createServer>,
@@ -283,6 +288,38 @@ describe("POST /api/turns", () => {
     await server.close();
 
     expect(response.statusCode).toBe(404);
+  });
+
+  it("still returns a successful turn when post-processing fails", async () => {
+    const server = createServer();
+    const extractSpy = vi
+      .spyOn(journeyMemoryService, "extractJourneyMemoryFromTurn")
+      .mockImplementationOnce(() => {
+        throw new Error("post processing failed");
+      });
+    const { adventure } = await createAdventureFromGeneratedCandidate(server, "isekai");
+    const sessionResponse = await server.inject({
+      method: "POST",
+      url: "/api/sessions",
+      payload: {
+        adventureId: adventure.id
+      }
+    });
+    const session = SessionSchema.parse(sessionResponse.json());
+    const turnResponse = await server.inject({
+      method: "POST",
+      url: "/api/turns",
+      payload: {
+        sessionId: session.id,
+        content: "我尝试调查高塔入口"
+      }
+    });
+
+    await server.close();
+
+    expect(turnResponse.statusCode).toBe(200);
+    expect(TurnResponseSchema.parse(turnResponse.json()).messages).toHaveLength(2);
+    extractSpy.mockRestore();
   });
 });
 
