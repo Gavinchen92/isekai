@@ -97,6 +97,7 @@ MVP 只暴露玩家需要的入口：开始新冒险、选背景、选冒险候�
 - `playerSetupOptions`：2-4 个玩家身份建议。
 - `openingScene`：第一幕开场。
 - `mainConflict`：当前主线矛盾。
+- `dramaticQuestion`：贯穿冒险的核心两难问题。
 - `storyArc`：Act 1 到 Ending 的阶段结构。
 - `winCondition`：什么算完成这段冒险。
 - `lossCondition`：什么算失败或坏结局。
@@ -105,6 +106,12 @@ MVP 只暴露玩家需要的入口：开始新冒险、选背景、选冒险候�
 - `factions`：关键阵营。
 - `locations`：关键地点。
 - `npcSeeds`：关键 NPC 草案。
+- `revelationLadder`：3-5 层逐步揭开的真相，避免一次性抖完隐藏设定。
+- `npcWeb`：关键 NPC 的欲望、恐惧、筹码、秘密和与玩家的关系张力。
+- `pressureClocks`：阵营、危机或倒计时的推进压力，保证玩家不行动时局势也会变化。
+- `scenePalette`：调查、交涉、潜入、逃亡、对峙等可切换场景类型。
+- `consequenceRules`：把失败、拖延、越权和牺牲转化成具体后果。
+- `antiClicheRules`：限制当前世界种子的高频套路和偷懒写法。
 - `toneGuidelines`：叙事风格。
 - `hiddenGmNotes`：只给 AI 看的秘密、伏笔和真相。
 - `runtimePrompt`：后续游玩使用的稳定 prompt。
@@ -129,14 +136,15 @@ MVP 只暴露玩家需要的入口：开始新冒险、选背景、选冒险候�
 1. 系统规则：语言、输出风格、边界、禁止事项。
 2. Adventure runtime prompt：生成阶段固化下来的世界观和叙事要求。
 3. Hidden GM notes：伏笔、秘密和未公开真相，只给模型看。
-4. Player setup：玩家最终选择或系统默认的身份。
-5. Known NPCs：当前冒险里的关键 NPC。
-6. 内部事件记录：系统确认已经发生的剧情事实。
-7. 内部任务状态：当前任务、目标和进度，只给 GM 使用。
-8. 内部百科：NPC、地点、阵营、物品等游戏内百科。
-9. Session summary：系统自动或半自动生成的阶段摘要。
-10. Recent messages：最近 N 轮消息。
-11. Current input：当前用户输入。
+4. Narrative engine：`dramaticQuestion`、`revelationLadder`、`npcWeb`、`pressureClocks`、`scenePalette`、`consequenceRules` 和 `antiClicheRules`。
+5. Player setup：玩家最终选择或系统默认的身份。
+6. Known NPCs：当前冒险里的关键 NPC。
+7. 内部事件记录：系统确认已经发生的剧情事实。
+8. 内部任务状态：当前任务、目标和进度，只给 GM 使用。
+9. 内部百科：NPC、地点、阵营、物品等游戏内百科。
+10. Session summary：系统自动或半自动生成的阶段摘要。
+11. Recent messages：最近 N 轮消息。
+12. Current input：当前用户输入。
 
 MVP 不提供玩家手工 pin memory。记忆能力要包装成游戏内日志和 GM 状态管理，玩家看到的是“旅途见闻”，不是 prompt 维护工具，也不是内部任务面板。
 
@@ -172,6 +180,7 @@ type AdventureCandidate = {
   openingScene: string;
   worldPremise: string;
   mainConflict: string;
+  dramaticQuestion: string;
   storyArc: StoryArc;
   winCondition: string;
   lossCondition: string;
@@ -180,6 +189,12 @@ type AdventureCandidate = {
   factions: FactionSeed[];
   locations: LocationSeed[];
   npcSeeds: NpcSeed[];
+  revelationLadder: RevelationStep[];
+  npcWeb: NpcWebEntry[];
+  pressureClocks: PressureClock[];
+  scenePalette: ScenePaletteEntry[];
+  consequenceRules: ConsequenceRule[];
+  antiClicheRules: string[];
   toneGuidelines: string;
   hiddenGmNotes: string;
   runtimePrompt: string;
@@ -203,6 +218,7 @@ type Adventure = {
   pitch: string;
   worldPremise: string;
   mainConflict: string;
+  dramaticQuestion: string;
   storyArc: StoryArc;
   currentAct: StoryActName;
   winCondition: string;
@@ -210,6 +226,12 @@ type Adventure = {
   endingSeeds: EndingSeed[];
   endgameTriggers: string[];
   selectedPlayerSetupId?: string;
+  revelationLadder: RevelationStep[];
+  npcWeb: NpcWebEntry[];
+  pressureClocks: PressureClock[];
+  scenePalette: ScenePaletteEntry[];
+  consequenceRules: ConsequenceRule[];
+  antiClicheRules: string[];
   runtimePrompt: string;
   hiddenGmNotes: string;
   endingSummary?: string;
@@ -264,6 +286,44 @@ type LocationSeed = {
   id: string;
   name: string;
   description: string;
+};
+
+type RevelationStep = {
+  id: string;
+  title: string;
+  publicClue: string;
+  hiddenTruth: string;
+  unlockHint: string;
+};
+
+type NpcWebEntry = {
+  npcName: string;
+  desire: string;
+  fear: string;
+  leverage: string;
+  secret: string;
+  relationshipToPlayer: string;
+};
+
+type PressureClock = {
+  id: string;
+  name: string;
+  stage: "dormant" | "active" | "critical";
+  trigger: string;
+  nextConsequence: string;
+};
+
+type ScenePaletteEntry = {
+  type: string;
+  purpose: string;
+  complication: string;
+  expectedPlayerActions: string[];
+};
+
+type ConsequenceRule = {
+  trigger: string;
+  consequence: string;
+  playerFacingSignal: string;
 };
 
 type Session = {
@@ -327,6 +387,22 @@ type GmTurnResult = {
   internalStatePatch: {
     currentAct?: StoryActName;
     flags: string[];
+    revealedTruthIds?: string[];
+    pressureClockUpdates?: Array<{
+      clockId: string;
+      status: "unchanged" | "advanced" | "resolved" | "critical";
+      note: string;
+    }>;
+    npcRelationshipUpdates?: Array<{
+      npcName: string;
+      disposition: "warmer" | "colder" | "guarded" | "hostile" | "loyal" | "unknown";
+      note: string;
+    }>;
+    sceneState?: {
+      sceneType: string;
+      pressure: "low" | "medium" | "high";
+      unresolvedQuestion: string;
+    };
     privateNotes: string[];
   };
 };

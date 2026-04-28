@@ -74,6 +74,44 @@ export const LocationSeedSchema = z.object({
   description: z.string().min(1)
 });
 
+export const RevelationStepSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  publicClue: z.string().min(1),
+  hiddenTruth: z.string().min(1),
+  unlockHint: z.string().min(1)
+});
+
+export const NpcWebEntrySchema = z.object({
+  npcName: z.string().min(1),
+  desire: z.string().min(1),
+  fear: z.string().min(1),
+  leverage: z.string().min(1),
+  secret: z.string().min(1),
+  relationshipToPlayer: z.string().min(1)
+});
+
+export const PressureClockSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  stage: z.enum(["dormant", "active", "critical"]),
+  trigger: z.string().min(1),
+  nextConsequence: z.string().min(1)
+});
+
+export const ScenePaletteEntrySchema = z.object({
+  type: z.string().min(1),
+  purpose: z.string().min(1),
+  complication: z.string().min(1),
+  expectedPlayerActions: z.array(z.string().min(1)).min(1)
+});
+
+export const ConsequenceRuleSchema = z.object({
+  trigger: z.string().min(1),
+  consequence: z.string().min(1),
+  playerFacingSignal: z.string().min(1)
+});
+
 export const AdventureCandidateSchema = z.object({
   id: z.string().min(1),
   requestId: z.string().min(1),
@@ -83,6 +121,7 @@ export const AdventureCandidateSchema = z.object({
   openingScene: z.string().min(1),
   worldPremise: z.string().min(1),
   mainConflict: z.string().min(1),
+  dramaticQuestion: z.string().min(1),
   storyArc: StoryArcSchema,
   winCondition: z.string().min(1),
   lossCondition: z.string().min(1),
@@ -91,6 +130,12 @@ export const AdventureCandidateSchema = z.object({
   factions: z.array(FactionSeedSchema),
   locations: z.array(LocationSeedSchema).min(1),
   npcSeeds: z.array(NpcSeedSchema).min(1),
+  revelationLadder: z.array(RevelationStepSchema).min(3),
+  npcWeb: z.array(NpcWebEntrySchema).min(1),
+  pressureClocks: z.array(PressureClockSchema).min(1),
+  scenePalette: z.array(ScenePaletteEntrySchema).min(3),
+  consequenceRules: z.array(ConsequenceRuleSchema).min(2),
+  antiClicheRules: z.array(z.string().min(1)).min(2),
   toneGuidelines: z.string().min(1),
   hiddenGmNotes: z.string().min(1),
   runtimePrompt: z.string().min(1),
@@ -141,6 +186,11 @@ export type AdventureCandidateGenerationRequest = z.infer<
 export type StoryAct = z.infer<typeof StoryActSchema>;
 export type StoryArc = z.infer<typeof StoryArcSchema>;
 export type EndingSeed = z.infer<typeof EndingSeedSchema>;
+export type RevelationStep = z.infer<typeof RevelationStepSchema>;
+export type NpcWebEntry = z.infer<typeof NpcWebEntrySchema>;
+export type PressureClock = z.infer<typeof PressureClockSchema>;
+export type ScenePaletteEntry = z.infer<typeof ScenePaletteEntrySchema>;
+export type ConsequenceRule = z.infer<typeof ConsequenceRuleSchema>;
 export type AdventureCandidate = z.infer<typeof AdventureCandidateSchema>;
 export type AdventureCandidatePreview = z.infer<typeof AdventureCandidatePreviewSchema>;
 export type Adventure = z.infer<typeof AdventureSchema>;

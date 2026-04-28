@@ -77,8 +77,16 @@ describe("buildGmTurnContext", () => {
     expect(publicContextText).not.toContain(input.adventure.hiddenGmNotes);
     expect(publicContextText).not.toContain(input.adventure.winCondition);
     expect(publicContextText).not.toContain(input.adventure.lossCondition);
+    expect(publicContextText).not.toContain(input.adventure.revelationLadder[0]?.hiddenTruth);
     expect(context.gmPrivateContext.hiddenGmNotes).toBe(input.adventure.hiddenGmNotes);
     expect(context.gmPrivateContext.winCondition).toBe(input.adventure.winCondition);
+    expect(context.gmPrivateContext.dramaticQuestion).toBe(input.adventure.dramaticQuestion);
+    expect(context.gmPrivateContext.revelationLadder[0]?.hiddenTruth).toBe(
+      input.adventure.revelationLadder[0]?.hiddenTruth
+    );
+    expect(context.gmPrivateContext.pressureClocks[0]?.name).toBe(
+      input.adventure.pressureClocks[0]?.name
+    );
     expect(context.gmPrivateContext.internalStatePatches[0]?.privateNotes).toContain(
       "上一轮隐藏判断"
     );
@@ -117,6 +125,7 @@ describe("buildGmPromptMessages", () => {
     expect(promptText).toContain("只返回一个 JSON 对象");
     expect(promptText).toContain("GmTurnResult");
     expect(promptText).toContain("不得在 narration");
+    expect(promptText).toContain("压力时钟");
     expect(promptText).toContain(context.gmPrivateContext.hiddenGmNotes);
   });
 });

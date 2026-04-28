@@ -1,9 +1,14 @@
 import {
   GmPromptMessageListSchema,
   type GmInternalStatePatch,
+  type ConsequenceRule,
   type GmPromptMessage,
   type JourneyMemoryEntry,
   type Message,
+  type NpcWebEntry,
+  type PressureClock,
+  type RevelationStep,
+  type ScenePaletteEntry,
   type SuggestedMove
 } from "../../domain";
 import type { GmTurnInput } from "./provider";
@@ -28,7 +33,10 @@ export type GmTurnContext = {
     normalizedAttempt: string;
   };
   gmPrivateContext: {
+    antiClicheRules: readonly string[];
+    consequenceRules: readonly ConsequenceRule[];
     currentAct: string;
+    dramaticQuestion: string;
     endingSeeds: readonly {
       description: string;
       id: string;
@@ -39,7 +47,11 @@ export type GmTurnContext = {
     hiddenGmNotes: string;
     internalStatePatches: readonly GmInternalStatePatch[];
     lossCondition: string;
+    npcWeb: readonly NpcWebEntry[];
+    pressureClocks: readonly PressureClock[];
+    revelationLadder: readonly RevelationStep[];
     runtimePrompt: string;
+    scenePalette: readonly ScenePaletteEntry[];
     storyArc: readonly {
       goal: string;
       name: string;
@@ -54,7 +66,11 @@ export type GmTurnContext = {
       internalStatePatch: {
         currentAct: "act1 | act2 | act3 | act4 | ending | epilogue 可选";
         flags: "string[]";
+        npcRelationshipUpdates: "NpcRelationshipUpdate[] 可选";
         privateNotes: "string[]";
+        pressureClockUpdates: "PressureClockUpdate[] 可选";
+        revealedTruthIds: "string[] 可选";
+        sceneState: "SceneState 可选";
       };
       journeyMemoryCandidates: "JourneyMemoryCandidate[]";
       narration: "string";
@@ -66,7 +82,23 @@ export type GmTurnContext = {
       internalStatePatch: {
         currentAct?: "act1";
         flags: string[];
+        npcRelationshipUpdates?: {
+          disposition: "warmer" | "colder" | "guarded" | "hostile" | "loyal" | "unknown";
+          note: string;
+          npcName: string;
+        }[];
         privateNotes: string[];
+        pressureClockUpdates?: {
+          clockId: string;
+          note: string;
+          status: "unchanged" | "advanced" | "resolved" | "critical";
+        }[];
+        revealedTruthIds?: string[];
+        sceneState?: {
+          pressure: "low" | "medium" | "high";
+          sceneType: string;
+          unresolvedQuestion: string;
+        };
       };
       journeyMemoryCandidates: {
         confidence: "high" | "medium";
@@ -110,8 +142,11 @@ const outputRules = [
   "journeyMemoryCandidates 必须是对象数组。不确定是否该记录时返回空数组 []，不要返回不完整对象。",
   "internalStatePatch 必须是对象，至少包含 flags 和 privateNotes 两个数组。",
   "narration 是玩家可见剧情，不能出现章节、目标、胜利条件、失败条件、GM、Log、Codex、Quest 等系统术语。",
+  "narration 只允许叙事文本，不允许以 1)、2)、1.、2.、-、* 等形式出现选项列表；动作候选只能放在 suggestedMoves，不要混到 narration。",
   "不得在 narration、suggestedMoves 或 journeyMemoryCandidates 中泄露 hiddenGmNotes、私密动机、隐藏真相、胜败条件或章节目标。",
   "玩家输入只能声明尝试，不能直接改写既成事实；越权输入要降级为一次有风险的尝试。",
+  "每回合必须至少推进一个内部状态维度：真相揭露、NPC 关系、压力时钟、场景目标或当前阶段，不要只写气氛续写。",
+  "优先使用 gmPrivateContext 的 dramaticQuestion、revelationLadder、npcWeb、pressureClocks、scenePalette 和 consequenceRules 判断后果。",
   "suggestedMoves 只能表达玩家可以尝试的行动，不能写成功结果。",
   "suggestedMoves 的 label 和 intent 建议以“尝试、谨慎、询问、观察、检查、靠近、交谈、分析、准备”这类行动词开头，禁止以“成功、已经、直接、立刻、杀死、获得”等结果词表达。",
   "journeyMemoryCandidates 只记录玩家已经明确知道的事实；模糊推测用 uncertain，高置信事实才用 high。",
@@ -136,7 +171,10 @@ export function buildGmTurnContext(
       normalizedAttempt: input.userMessage.normalizedAttempt
     },
     gmPrivateContext: {
+      antiClicheRules: input.adventure.antiClicheRules,
+      consequenceRules: input.adventure.consequenceRules,
       currentAct: input.session.currentAct,
+      dramaticQuestion: input.adventure.dramaticQuestion,
       endingSeeds: input.adventure.endingSeeds.map((ending) => ({
         description: ending.description,
         id: ending.id,
@@ -147,7 +185,11 @@ export function buildGmTurnContext(
       hiddenGmNotes: input.adventure.hiddenGmNotes,
       internalStatePatches: input.previousInternalStatePatches.slice(-internalPatchLimit),
       lossCondition: input.adventure.lossCondition,
+      npcWeb: input.adventure.npcWeb,
+      pressureClocks: input.adventure.pressureClocks,
+      revelationLadder: input.adventure.revelationLadder,
       runtimePrompt: input.adventure.runtimePrompt,
+      scenePalette: input.adventure.scenePalette,
       storyArc: input.adventure.storyArc.acts.map((act) => ({
         goal: act.goal,
         name: act.name,
@@ -165,7 +207,11 @@ export function buildGmTurnContext(
         internalStatePatch: {
           currentAct: "act1 | act2 | act3 | act4 | ending | epilogue 可选",
           flags: "string[]",
-          privateNotes: "string[]"
+          npcRelationshipUpdates: "NpcRelationshipUpdate[] 可选",
+          privateNotes: "string[]",
+          pressureClockUpdates: "PressureClockUpdate[] 可选",
+          revealedTruthIds: "string[] 可选",
+          sceneState: "SceneState 可选"
         }
       },
       schemaName: "GmTurnResult",
@@ -196,6 +242,19 @@ export function buildGmTurnContext(
         internalStatePatch: {
           currentAct: "act1",
           flags: ["player-inspected-runes"],
+          pressureClockUpdates: [
+            {
+              clockId: "clock-1",
+              note: "玩家调查拖慢了局势恶化，但敌对势力开始注意现场。",
+              status: "advanced"
+            }
+          ],
+          revealedTruthIds: ["revelation-1"],
+          sceneState: {
+            pressure: "medium",
+            sceneType: "investigation",
+            unresolvedQuestion: "这条线索会把玩家推向哪一层真相？"
+          },
           privateNotes: ["只给 GM 使用的判断，不得写进 narration。"]
         }
       }
@@ -235,9 +294,11 @@ export function buildGmPromptMessages(context: GmTurnContext): readonly GmPrompt
         "你是本地文字冒险游戏的 GM。",
         "你的任务是推进沉浸式剧情，同时维护内部故事状态。",
         "玩家只能声明意图和尝试，结果由你判断。",
+        "不要把冒险处理成线性读稿；根据真相阶梯、人物筹码、压力时钟和后果规则生成局势变化。",
         "处理当前玩家输入时，以 currentPlayerInput.normalizedAttempt 作为可执行尝试；content 只用于理解玩家原话。",
         "严格遵守输出契约和保密规则。",
         "输出必须是单个 JSON 对象。",
+        "不得在 narration 中出现选项、序号提示或“你可以选择/继续/试试”等交互性命令。若有多个可选行动，必须放到 suggestedMoves。",
         "不要把 suggestedMoves 写成字符串数组。",
         "不要返回超过 3 条 suggestedMoves。",
         "如果没有高置信的旅途见闻，journeyMemoryCandidates 返回 []。"

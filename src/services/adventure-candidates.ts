@@ -6,11 +6,16 @@ import {
   AdventureCandidateSchema,
   AdventureIntensitySchema,
   AdventureToneSchema,
+  ConsequenceRuleSchema,
   EndingSeedSchema,
   FactionSeedSchema,
   LocationSeedSchema,
+  NpcWebEntrySchema,
   NpcSeedSchema,
   PlayerSetupOptionSchema,
+  PressureClockSchema,
+  RevelationStepSchema,
+  ScenePaletteEntrySchema,
   StoryActNameSchema,
   type AdventureCandidate,
   type AdventureCandidateGenerationRequest,
@@ -86,6 +91,7 @@ const AdventureCandidateDraftSchema = z.object({
   openingScene: z.string().min(1),
   worldPremise: z.string().min(1),
   mainConflict: z.string().min(1),
+  dramaticQuestion: z.string().min(1),
   storyArc: z.object({
     acts: z
       .array(
@@ -105,6 +111,12 @@ const AdventureCandidateDraftSchema = z.object({
   factions: z.array(FactionSeedSchema.omit({ id: true })).min(1).max(4),
   locations: z.array(LocationSeedSchema.omit({ id: true })).min(1).max(5),
   npcSeeds: z.array(NpcSeedSchema.omit({ id: true })).min(1).max(5),
+  revelationLadder: z.array(RevelationStepSchema.omit({ id: true })).min(3).max(5),
+  npcWeb: z.array(NpcWebEntrySchema).min(1).max(5),
+  pressureClocks: z.array(PressureClockSchema.omit({ id: true })).min(1).max(4),
+  scenePalette: z.array(ScenePaletteEntrySchema).min(3).max(8),
+  consequenceRules: z.array(ConsequenceRuleSchema).min(2).max(6),
+  antiClicheRules: z.array(z.string().min(1)).min(2).max(6),
   toneGuidelines: z.string().min(1),
   hiddenGmNotes: z.string().min(1),
   runtimePrompt: z.string().min(1),
@@ -382,6 +394,130 @@ function buildStoryArc(title: string): StoryArc {
   };
 }
 
+function buildDramaticQuestion(blueprint: CandidateBlueprint): string {
+  return `当「${blueprint.mainConflict}」逼近终局时，玩家愿意牺牲什么来换取真正的答案？`;
+}
+
+function buildRevelationLadder(candidateId: string, blueprint: CandidateBlueprint) {
+  return [
+    {
+      id: `${candidateId}-revelation-1`,
+      title: "表层异常",
+      publicClue: `${blueprint.locationName} 出现了能被玩家直接验证的异常痕迹。`,
+      hiddenTruth: `这些痕迹并不是孤立事件，而是「${blueprint.mainConflict}」的第一层外显。`,
+      unlockHint: "玩家主动调查现场、追问目击者或承担一次风险后揭开。"
+    },
+    {
+      id: `${candidateId}-revelation-2`,
+      title: "人物隐瞒",
+      publicClue: `${blueprint.npcName} 提供的说法前后存在空白。`,
+      hiddenTruth: `${blueprint.npcName} 保留了与 ${blueprint.factionName} 有关的关键筹码。`,
+      unlockHint: "玩家建立信任、施压或发现旁证后揭开。"
+    },
+    {
+      id: `${candidateId}-revelation-3`,
+      title: "终局真相",
+      publicClue: `${blueprint.factionName} 的公开行动和真实收益并不一致。`,
+      hiddenTruth: `真正的危险不是单一敌人，而是玩家如何处理「${blueprint.winCondition}」与代价之间的冲突。`,
+      unlockHint: "玩家进入 act4 或触发一个压力时钟的 critical 状态后揭开。"
+    }
+  ];
+}
+
+function buildNpcWeb(blueprint: CandidateBlueprint) {
+  return [
+    {
+      npcName: blueprint.npcName,
+      desire: "保住自己仍能交换的最后筹码。",
+      fear: "玩家过早公开真相，导致自己被主要势力清算。",
+      leverage: `掌握通往 ${blueprint.locationName} 深层线索的入口。`,
+      secret: `与 ${blueprint.factionName} 的真实关系比公开身份更复杂。`,
+      relationshipToPlayer: "既需要玩家推进局势，也担心玩家破坏自己的退路。"
+    }
+  ];
+}
+
+function buildPressureClocks(candidateId: string, blueprint: CandidateBlueprint) {
+  return [
+    {
+      id: `${candidateId}-clock-1`,
+      name: `${blueprint.factionName} 的封锁`,
+      stage: "active" as const,
+      trigger: "玩家拖延、公开挑衅或让关键证据落到敌对势力手中。",
+      nextConsequence: `${blueprint.factionName} 会收紧行动空间，让安全调查变成高风险选择。`
+    },
+    {
+      id: `${candidateId}-clock-2`,
+      name: "核心危机外溢",
+      stage: "dormant" as const,
+      trigger: "玩家连续忽视现场异常，或在没有准备的情况下触碰核心秘密。",
+      nextConsequence: blueprint.lossCondition
+    }
+  ];
+}
+
+function buildScenePalette(seed: WorldSeedPreset, blueprint: CandidateBlueprint) {
+  const negotiationComplication = `${blueprint.npcName} 不愿直接说出与 ${blueprint.factionName} 有关的隐瞒。`;
+
+  return [
+    {
+      type: "investigation",
+      purpose: `让玩家在 ${blueprint.locationName} 找到可验证线索。`,
+      complication: "线索会指向两个互相矛盾的解释，玩家必须选择先相信哪一边。",
+      expectedPlayerActions: ["观察现场", "检查痕迹", "比对证词"]
+    },
+    {
+      type: "negotiation",
+      purpose: `通过 ${blueprint.npcName} 暴露人物动机和关系压力。`,
+      complication: negotiationComplication,
+      expectedPlayerActions: ["追问细节", "建立信任", "提出交换条件"]
+    },
+    {
+      type: seed.defaultTone === "dark" ? "escape" : "confrontation",
+      purpose: "让主线矛盾公开化，并迫使玩家承担一个可见代价。",
+      complication: `${blueprint.mainConflict} 会在玩家犹豫时继续扩大。`,
+      expectedPlayerActions: ["保护盟友", "制造破局机会", "选择牺牲对象"]
+    }
+  ];
+}
+
+function buildConsequenceRules(blueprint: CandidateBlueprint) {
+  return [
+    {
+      trigger: "玩家强行跳过调查或直接声明成功结果。",
+      consequence: "把行动降级为高风险尝试，并推进一个压力时钟。",
+      playerFacingSignal: `${blueprint.locationName} 的阻碍变得更直接，旁观者开始怀疑玩家。`
+    },
+    {
+      trigger: `玩家伤害、欺骗或公开出卖 ${blueprint.npcName}。`,
+      consequence: "该 NPC 的关系转冷，但可能吐露一条带有偏见的线索。",
+      playerFacingSignal: `${blueprint.npcName} 会给出有用但不完整的信息，并要求玩家付出补偿。`
+    },
+    {
+      trigger: "玩家选择稳妥路线并接受时间代价。",
+      consequence: "给出更可靠的线索，同时让敌对势力提前一步行动。",
+      playerFacingSignal: `${blueprint.factionName} 的下一步行动会在场景边缘显影。`
+    }
+  ];
+}
+
+function buildAntiClicheRules(seedId: WorldSeedId): string[] {
+  switch (seedId) {
+    case "isekai":
+      return ["不要把问题简化成升级刷怪。", "不要让魔王、技能面板或公会任务成为唯一推动力。"];
+    case "medieval":
+      return ["不要把所有冲突都归结为邪教阴谋。", "不要让贵族、教会和骑士只有单一脸谱。"];
+    case "ancient-china":
+      return ["不要混用朝代符号制造空泛古风。", "不要让江湖门派只承担打斗功能。"];
+    case "sengoku-japan":
+      return ["不要把忠诚与背叛写成一次反转。", "不要让忍者或妖怪传说替代政治压力。"];
+    default: {
+      const exhaustiveSeedId: never = seedId;
+      throw new Error(`unhandled world seed: ${exhaustiveSeedId}`);
+    }
+  }
+}
+
 function getWorldSeed(seedId: WorldSeedPreset["id"]): WorldSeedPreset {
   const seed = listWorldSeedPresets().find((preset) => preset.id === seedId);
 
@@ -400,9 +536,10 @@ export function generateMockAdventureCandidates(
   const blueprints = blueprintsBySeed[request.worldSeedId].slice(0, request.candidateCount);
   const candidates = blueprints.map((blueprint, index): AdventureCandidate => {
     const candidateNumber = index + 1;
+    const candidateId = `${seed.id}-candidate-${candidateNumber}`;
 
     return {
-      id: `${seed.id}-candidate-${candidateNumber}`,
+      id: candidateId,
       requestId: `${seed.id}-request-local`,
       title: blueprint.title,
       pitch: blueprint.pitch,
@@ -423,6 +560,7 @@ export function generateMockAdventureCandidates(
       openingScene: blueprint.openingScene,
       worldPremise: `${seed.description}${seed.generationPrompt}`,
       mainConflict: blueprint.mainConflict,
+      dramaticQuestion: buildDramaticQuestion(blueprint),
       storyArc: buildStoryArc(blueprint.title),
       winCondition: blueprint.winCondition,
       lossCondition: blueprint.lossCondition,
@@ -464,9 +602,15 @@ export function generateMockAdventureCandidates(
           privateMotivation: "避免自己在主线冲突中失去最后的筹码。"
         }
       ],
+      revelationLadder: buildRevelationLadder(candidateId, blueprint),
+      npcWeb: buildNpcWeb(blueprint),
+      pressureClocks: buildPressureClocks(candidateId, blueprint),
+      scenePalette: buildScenePalette(seed, blueprint),
+      consequenceRules: buildConsequenceRules(blueprint),
+      antiClicheRules: buildAntiClicheRules(seed.id),
       toneGuidelines: `保持${seed.defaultTone}气质，给玩家清晰选择，但不要直接替玩家决定结果。`,
-      hiddenGmNotes: "这是本地 mock 数据。后续接入 LLM 后由 provider 生成更丰富的伏笔。",
-      runtimePrompt: `围绕《${blueprint.title}》推进故事。玩家只能声明尝试，结果由 AI/GM 判断。`,
+      hiddenGmNotes: `这是本地 mock 数据。围绕「${blueprint.mainConflict}」分层揭露真相，不要一次说完所有秘密。`,
+      runtimePrompt: `围绕《${blueprint.title}》推进故事。每回合至少推进一个状态：线索、关系、压力时钟或场景目标。玩家只能声明尝试，结果由 AI/GM 判断。`,
       tags: [...blueprint.tags, seed.name]
     };
   });
@@ -1075,12 +1219,18 @@ function buildAdventureCandidatePromptMessages(
         "输出必须是单个 JSON 对象，不要 Markdown，不要解释，不要代码块。",
         "JSON 顶层必须是 {\"candidates\": [...]}。",
         `candidates 必须正好包含 ${request.candidateCount} 个候选。`,
-        "每个候选必须有完整字段：title, pitch, playerSetupOptions, openingScene, worldPremise, mainConflict, storyArc, winCondition, lossCondition, endingSeeds, endgameTriggers, factions, locations, npcSeeds, toneGuidelines, hiddenGmNotes, runtimePrompt, tags。",
+        "每个候选必须有完整字段：title, pitch, playerSetupOptions, openingScene, worldPremise, mainConflict, dramaticQuestion, storyArc, winCondition, lossCondition, endingSeeds, endgameTriggers, factions, locations, npcSeeds, revelationLadder, npcWeb, pressureClocks, scenePalette, consequenceRules, antiClicheRules, toneGuidelines, hiddenGmNotes, runtimePrompt, tags。",
         "不要生成任何 id 字段，服务端会生成 id。",
         "storyArc.acts 必须包含 act1、act2、act3、act4、ending 五个阶段，每个阶段都有 title、goal、transitionHint。",
         "playerSetupOptions 至少 2 个，endingSeeds 至少 2 个，locations 至少 1 个，npcSeeds 至少 1 个。",
         "hiddenGmNotes 可以包含 GM 私有秘密，但 pitch、openingScene、worldPremise、runtimePrompt 不能直接泄露隐藏真相。",
-        "每个冒险必须能在 1-3 小时内完成，有明确主线冲突和多个结局方向。"
+        "每个冒险必须能在 1-3 小时内完成，有明确主线冲突和多个结局方向。",
+        "dramaticQuestion 必须是一个能贯穿整段冒险的两难问题，不要只是复述主线目标。",
+        "revelationLadder 必须包含 3-5 层逐步揭开的真相，每层包含 title、publicClue、hiddenTruth、unlockHint。",
+        "npcWeb 必须描述关键 NPC 的 desire、fear、leverage、secret、relationshipToPlayer，用来制造关系压力。",
+        "pressureClocks 必须包含 1-4 个局势倒计时，每个包含 name、stage、trigger、nextConsequence，stage 只能是 dormant、active、critical。",
+        "scenePalette 必须包含 3-8 种不同场景类型，每个包含 type、purpose、complication、expectedPlayerActions。",
+        "consequenceRules 必须把玩家失败、拖延、越权或牺牲转化成具体后果；antiClicheRules 必须限制当前世界种子的高频套路。"
       ].join("\n")
     },
     {
@@ -1106,6 +1256,7 @@ function buildAdventureCandidatePromptMessages(
               openingScene: "第一幕开场，直接给玩家可玩的局面。",
               worldPremise: "公开世界观前提。",
               mainConflict: "主线矛盾。",
+              dramaticQuestion: "贯穿冒险的核心两难问题。",
               storyArc: {
                 acts: StoryActNameSchema.options
                   .filter((name) => name !== "epilogue")
@@ -1152,6 +1303,77 @@ function buildAdventureCandidatePromptMessages(
                   privateMotivation: "GM 私有动机，可选。"
                 }
               ],
+              revelationLadder: [
+                {
+                  title: "第一层真相",
+                  publicClue: "玩家可见的线索。",
+                  hiddenTruth: "GM 私有真相。",
+                  unlockHint: "揭开这一层真相的触发方式。"
+                },
+                {
+                  title: "第二层真相",
+                  publicClue: "前一层线索中矛盾或缺口。",
+                  hiddenTruth: "更接近核心冲突的私有真相。",
+                  unlockHint: "玩家承担代价、建立信任或触发压力后揭开。"
+                },
+                {
+                  title: "终局真相",
+                  publicClue: "足以改变玩家选择的公开征兆。",
+                  hiddenTruth: "把主线矛盾、NPC 秘密和结局代价串起来的最终真相。",
+                  unlockHint: "进入 act4 或 pressureClocks 推进到 critical 后揭开。"
+                }
+              ],
+              npcWeb: [
+                {
+                  npcName: "关键 NPC",
+                  desire: "这个人想得到什么。",
+                  fear: "这个人害怕失去什么。",
+                  leverage: "这个人能提供或控制的筹码。",
+                  secret: "这个人暂时隐瞒的事实。",
+                  relationshipToPlayer: "这个人与玩家的初始张力。"
+                }
+              ],
+              pressureClocks: [
+                {
+                  name: "局势倒计时",
+                  stage: "active",
+                  trigger: "什么会推进这个时钟。",
+                  nextConsequence: "时钟推进后的具体后果。"
+                }
+              ],
+              scenePalette: [
+                {
+                  type: "investigation",
+                  purpose: "这种场景在故事中的作用。",
+                  complication: "玩家推进时会遇到的变数。",
+                  expectedPlayerActions: ["观察", "追问", "冒险尝试"]
+                },
+                {
+                  type: "negotiation",
+                  purpose: "通过人物关系和筹码交换推进线索。",
+                  complication: "NPC 会隐瞒一部分真相或提出代价。",
+                  expectedPlayerActions: ["建立信任", "施压", "交换条件"]
+                },
+                {
+                  type: "confrontation",
+                  purpose: "把主线矛盾公开化并迫使玩家承担选择。",
+                  complication: "局势压力会限制安全选项。",
+                  expectedPlayerActions: ["保护盟友", "揭露证据", "选择牺牲"]
+                }
+              ],
+              consequenceRules: [
+                {
+                  trigger: "玩家行为或失败条件。",
+                  consequence: "GM 内部采用的后果。",
+                  playerFacingSignal: "玩家能在剧情中感知到的反馈。"
+                },
+                {
+                  trigger: "玩家拖延、越权或跳过代价。",
+                  consequence: "推进一个压力时钟，减少安全选项。",
+                  playerFacingSignal: "敌对势力、环境危险或 NPC 态度出现可见变化。"
+                }
+              ],
+              antiClicheRules: ["禁止当前题材最常见的偷懒套路。"],
               toneGuidelines: "叙事风格规则。",
               hiddenGmNotes: "只给 GM 的秘密、伏笔和真相。",
               runtimePrompt: "后续游玩回合使用的稳定 GM 提示。",
@@ -1203,6 +1425,8 @@ function buildAdventureCandidateConceptPromptMessages(
         "teaser 只能描述公开氛围和入口，不泄露具体主线真相、胜败条件、结局或隐藏 GM 笔记。",
         "creativeVariant.variantSeed 只用于增加创意随机性，不要输出 seed。",
         "必须围绕 creativeVariant.variantFocus 做出明显差异化。",
+        "同一批候选之间必须在玩家身份、核心冲突、主要玩法循环、道德困境、反派形态和结局代价上明显不同。",
+        "不要复用示例里的断塔、城邦警钟、外来者/局内人组合；示例只说明 JSON 形状。",
         "avoidTitles 中的标题不要重复使用。",
         "不要生成任何 id 字段，服务端会生成 id。"
       ].join("\n")
@@ -1233,6 +1457,14 @@ function buildAdventureCandidateConceptPromptMessages(
         },
         avoidTitles: variant.avoidTitles,
         creativeVariant: {
+          differenceAxes: [
+            "玩家身份",
+            "核心冲突",
+            "主要玩法循环",
+            "道德困境",
+            "反派或压力来源",
+            "可能结局代价"
+          ],
           variantFocus: variant.variantFocus,
           variantIndex: variant.variantIndex,
           variantSeed: variant.variantSeed
@@ -1271,11 +1503,13 @@ function buildAdventureCandidateDetailPromptMessages(
         "输出必须是单个 JSON 对象，不要 Markdown，不要解释，不要代码块。",
         "JSON 顶层必须是 {\"adventure\": {...}}。",
         "不要输出 title, playerSetupOptions, tags 或任何 id 字段；服务端会沿用已选候选的这些字段。",
-        "adventure 必须包含完整字段：pitch, openingScene, worldPremise, mainConflict, storyArc, winCondition, lossCondition, endingSeeds, endgameTriggers, factions, locations, npcSeeds, toneGuidelines, hiddenGmNotes, runtimePrompt。",
+        "adventure 必须包含完整字段：pitch, openingScene, worldPremise, mainConflict, dramaticQuestion, storyArc, winCondition, lossCondition, endingSeeds, endgameTriggers, factions, locations, npcSeeds, revelationLadder, npcWeb, pressureClocks, scenePalette, consequenceRules, antiClicheRules, toneGuidelines, hiddenGmNotes, runtimePrompt。",
         "storyArc.acts 必须包含 act1、act2、act3、act4、ending 五个阶段，每个阶段都有 title、goal、transitionHint。",
         "endingSeeds 至少 2 个，locations 至少 1 个，npcSeeds 至少 1 个。",
         "hiddenGmNotes 可以包含 GM 私有秘密，但 pitch、openingScene、worldPremise、runtimePrompt 不能直接泄露隐藏真相。",
-        "完整冒险必须严格承接 selectedConcept 的标题、teaser、玩家身份和标签。"
+        "完整冒险必须严格承接 selectedConcept 的标题、teaser、玩家身份和标签。",
+        "不要只生成线性大纲；必须把冒险补成可运行的局势系统：戏剧问题、真相阶梯、人物关系网、压力时钟、场景类型和后果规则都要具体。",
+        "revelationLadder 必须有 3-5 层；pressureClocks.stage 只能是 dormant、active、critical；scenePalette 至少包含调查、关系或冲突中的三类差异场景。"
       ].join("\n")
     },
     {
@@ -1287,6 +1521,7 @@ function buildAdventureCandidateDetailPromptMessages(
             openingScene: "第一幕开场，直接给玩家可玩的局面。",
             worldPremise: "公开世界观前提。",
             mainConflict: "主线矛盾，只给 GM 使用。",
+            dramaticQuestion: "贯穿冒险的核心两难问题。",
             storyArc: {
               acts: StoryActNameSchema.options
                 .filter((name) => name !== "epilogue")
@@ -1333,6 +1568,77 @@ function buildAdventureCandidateDetailPromptMessages(
                 privateMotivation: "GM 私有动机，可选。"
               }
             ],
+            revelationLadder: [
+              {
+                title: "第一层真相",
+                publicClue: "玩家可见的线索。",
+                hiddenTruth: "GM 私有真相。",
+                unlockHint: "揭开这一层真相的触发方式。"
+              },
+              {
+                title: "第二层真相",
+                publicClue: "前一层线索中矛盾或缺口。",
+                hiddenTruth: "更接近核心冲突的私有真相。",
+                unlockHint: "玩家承担代价、建立信任或触发压力后揭开。"
+              },
+              {
+                title: "终局真相",
+                publicClue: "足以改变玩家选择的公开征兆。",
+                hiddenTruth: "把主线矛盾、NPC 秘密和结局代价串起来的最终真相。",
+                unlockHint: "进入 act4 或 pressureClocks 推进到 critical 后揭开。"
+              }
+            ],
+            npcWeb: [
+              {
+                npcName: "关键 NPC",
+                desire: "这个人想得到什么。",
+                fear: "这个人害怕失去什么。",
+                leverage: "这个人能提供或控制的筹码。",
+                secret: "这个人暂时隐瞒的事实。",
+                relationshipToPlayer: "这个人与玩家的初始张力。"
+              }
+            ],
+            pressureClocks: [
+              {
+                name: "局势倒计时",
+                stage: "active",
+                trigger: "什么会推进这个时钟。",
+                nextConsequence: "时钟推进后的具体后果。"
+              }
+            ],
+            scenePalette: [
+              {
+                type: "investigation",
+                purpose: "这种场景在故事中的作用。",
+                complication: "玩家推进时会遇到的变数。",
+                expectedPlayerActions: ["观察", "追问", "冒险尝试"]
+              },
+              {
+                type: "negotiation",
+                purpose: "通过人物关系和筹码交换推进线索。",
+                complication: "NPC 会隐瞒一部分真相或提出代价。",
+                expectedPlayerActions: ["建立信任", "施压", "交换条件"]
+              },
+              {
+                type: "confrontation",
+                purpose: "把主线矛盾公开化并迫使玩家承担选择。",
+                complication: "局势压力会限制安全选项。",
+                expectedPlayerActions: ["保护盟友", "揭露证据", "选择牺牲"]
+              }
+            ],
+            consequenceRules: [
+              {
+                trigger: "玩家行为或失败条件。",
+                consequence: "GM 内部采用的后果。",
+                playerFacingSignal: "玩家能在剧情中感知到的反馈。"
+              },
+              {
+                trigger: "玩家拖延、越权或跳过代价。",
+                consequence: "推进一个压力时钟，减少安全选项。",
+                playerFacingSignal: "敌对势力、环境危险或 NPC 态度出现可见变化。"
+              }
+            ],
+            antiClicheRules: ["禁止当前题材最常见的偷懒套路。"],
             toneGuidelines: "叙事风格规则。",
             hiddenGmNotes: "只给 GM 的秘密、伏笔和真相。",
             runtimePrompt: "后续游玩回合使用的稳定 GM 提示。"
@@ -1410,6 +1716,14 @@ function buildAdventureCandidateFromDraft(
           (act.name === "ending" ? "保存结局摘要，并允许玩家查看后日谈。" : "进入下一阶段。")
       }))
     },
+    revelationLadder: draft.revelationLadder.map((step, stepIndex) => ({
+      ...step,
+      id: `${candidatePrefix}-revelation-${stepIndex + 1}`
+    })),
+    pressureClocks: draft.pressureClocks.map((clock, clockIndex) => ({
+      ...clock,
+      id: `${candidatePrefix}-clock-${clockIndex + 1}`
+    })),
     playerSetupOptions: draft.playerSetupOptions.map((option, optionIndex) => ({
       ...option,
       id: `${candidatePrefix}-player-${optionIndex + 1}`
@@ -1452,6 +1766,14 @@ function buildAdventureCandidateFromDetailDraft(
           (act.name === "ending" ? "保存结局摘要，并允许玩家查看后日谈。" : "进入下一阶段。")
       }))
     },
+    revelationLadder: draft.revelationLadder.map((step, stepIndex) => ({
+      ...step,
+      id: `${concept.id}-revelation-${stepIndex + 1}`
+    })),
+    pressureClocks: draft.pressureClocks.map((clock, clockIndex) => ({
+      ...clock,
+      id: `${concept.id}-clock-${clockIndex + 1}`
+    })),
     playerSetupOptions: concept.playerSetupOptions,
     endingSeeds: draft.endingSeeds.map((ending, endingIndex) => ({
       ...ending,

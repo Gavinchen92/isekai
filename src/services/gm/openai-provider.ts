@@ -123,7 +123,8 @@ export function parseGmTurnResultJson(content: string, logContext: LogContext = 
   }
 
   const normalizedDraft = normalizeOpenAiGmTurnResultDraft(parsedJson);
-  const result = GmTurnResultSchema.safeParse(normalizedDraft);
+  const normalizedDraftWithNarration = sanitizeNarrationInGmTurnDraft(normalizedDraft);
+  const result = GmTurnResultSchema.safeParse(normalizedDraftWithNarration);
 
   if (!result.success) {
     logAiStructuredOutputParseFailure({
@@ -239,12 +240,54 @@ function createNarrationDeltaTracker(): {
         return "";
       }
 
-      const delta = narration.slice(emittedNarration.length);
-      emittedNarration = narration;
+      const cleanedNarration = sanitizeNarrationText(narration);
+      const delta = cleanedNarration.slice(emittedNarration.length);
+      emittedNarration = cleanedNarration;
 
       return delta;
     }
   };
+}
+
+function sanitizeNarrationInGmTurnDraft(parsedJson: unknown): unknown {
+  if (!parsedJson || typeof parsedJson !== "object" || !("narration" in parsedJson)) {
+    return parsedJson;
+  }
+
+  const narrationCandidate = (parsedJson as { narration?: unknown }).narration;
+
+  if (typeof narrationCandidate !== "string") {
+    return parsedJson;
+  }
+
+  return {
+    ...parsedJson,
+    narration: sanitizeNarrationText(narrationCandidate)
+  };
+}
+
+function sanitizeNarrationText(text: string): string {
+  const lines = text.split(/\r?\n/u);
+  const cleanedLines = lines.filter((line) => !isNarrationOptionLine(line));
+
+  return cleanedLines.join("\n").replace(/\n{3,}/gu, "\n\n").trim();
+}
+
+function isNarrationOptionLine(line: string): boolean {
+  const trimmed = line.trim();
+
+  if (!trimmed) {
+    return false;
+  }
+
+  const hasOptionPrefix = /^(\d+|[一二三四五六七八九十]+)\s*[\)）\]〕\.．:\uFF1A-]/u.test(
+    trimmed
+  );
+  const hasActionCue = /(?:尝试|试图|跟踪|跟随|跟上|进入|离开|靠近|观察|检查|调查|接近|交涉|交谈|说|确认|走向|躲避|绕开|继续|推进|前往|回头|打开|探索|分析)/u.test(
+    trimmed
+  );
+
+  return hasOptionPrefix && hasActionCue;
 }
 
 function parseJsonStringPrefix(

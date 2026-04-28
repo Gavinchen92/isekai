@@ -44,6 +44,10 @@ describe("generateMockAdventureCandidates", () => {
     expect(candidates).toHaveLength(3);
     expect(candidates[0]?.storyArc.acts.at(-1)?.name).toBe("ending");
     expect(candidates[0]?.endingSeeds).toHaveLength(2);
+    expect(candidates[0]?.dramaticQuestion).toContain("牺牲");
+    expect(candidates[0]?.revelationLadder).toHaveLength(3);
+    expect(candidates[0]?.pressureClocks[0]?.stage).toBe("active");
+    expect(candidates[0]?.scenePalette.map((scene) => scene.type)).toContain("investigation");
   });
 
   it("supports smaller candidate counts", () => {
@@ -341,6 +345,8 @@ describe("parseAdventureCandidateDraftJson", () => {
 
     expect(AdventureCandidateListSchema.parse(candidates)).toHaveLength(1);
     expect(candidates[0]?.endingSeeds[0]?.id).toBe("isekai-ai-1-ending-1");
+    expect(candidates[0]?.revelationLadder[0]?.id).toBe("isekai-ai-1-revelation-1");
+    expect(candidates[0]?.pressureClocks[0]?.id).toBe("isekai-ai-1-clock-1");
     expect(candidates[0]?.locations[0]?.id).toBe("isekai-ai-1-location-1");
   });
 });
@@ -484,6 +490,7 @@ function createDetailResponseContent(): string {
       openingScene: "铜钟碎片散落在脚边，远处传来公会警钟。",
       worldPremise: "这是一个职业、魔法和公会并存的异世界城邦。",
       mainConflict: "钟楼裂缝释放旧神低语，城邦准备封锁所有召唤者。",
+      ...createNarrativeEngineDraft(),
       storyArc: {
         acts: [
           {
@@ -582,6 +589,7 @@ function createDraftResponseContent(): string {
         openingScene: "铜钟碎片散落在脚边，远处传来公会警钟。",
         worldPremise: "这是一个职业、魔法和公会并存的异世界城邦。",
         mainConflict: "钟楼裂缝释放旧神低语，城邦准备封锁所有召唤者。",
+        ...createNarrativeEngineDraft(),
         storyArc: {
           acts: [
             {
@@ -659,4 +667,87 @@ function createDraftResponseContent(): string {
       }
     ]
   });
+}
+
+function createNarrativeEngineDraft() {
+  return {
+    dramaticQuestion: "玩家是否愿意牺牲一位无辜者的自由来封住旧神低语？",
+    revelationLadder: [
+      {
+        title: "钟声只回应玩家",
+        publicClue: "钟楼碎片在玩家靠近时重新发热。",
+        hiddenTruth: "玩家并不是事故源头，而是旧封印选中的替代钥匙。",
+        unlockHint: "玩家检查钟楼碎片或承受一次钟声幻听后揭开。"
+      },
+      {
+        title: "守钟人留下假死线索",
+        publicClue: "守钟人的登记册最后一页被人为撕掉。",
+        hiddenTruth: "守钟人主动进入裂隙，阻止公会高层夺取封印钥匙。",
+        unlockHint: "玩家取得莉瑟信任或找到登记册残页后揭开。"
+      },
+      {
+        title: "公会封锁另有目的",
+        publicClue: "封锁令只抓召唤者，却没有疏散钟楼附近居民。",
+        hiddenTruth: "公会高层想借封锁掩盖第一次钟楼事故的责任。",
+        unlockHint: "玩家进入 act3 或压力时钟推进到 critical 后揭开。"
+      }
+    ],
+    npcWeb: [
+      {
+        npcName: "莉瑟",
+        desire: "找到失踪兄长并保住公会书记官身份。",
+        fear: "玩家过早公开真相，导致兄长被当成灾厄处决。",
+        leverage: "她能调取钟楼事故登记册。",
+        secret: "她知道守钟人和自己兄长最后一次见面。",
+        relationshipToPlayer: "她需要玩家行动，但不完全信任玩家。"
+      }
+    ],
+    pressureClocks: [
+      {
+        name: "公会封锁",
+        stage: "active",
+        trigger: "玩家公开使用钟声能力或拖延调查。",
+        nextConsequence: "公会会缩小行动范围并逮捕更多召唤者。"
+      },
+      {
+        name: "旧神低语外溢",
+        stage: "dormant",
+        trigger: "玩家触碰核心裂隙但没有准备。",
+        nextConsequence: "钟声开始影响普通居民的记忆。"
+      }
+    ],
+    scenePalette: [
+      {
+        type: "investigation",
+        purpose: "确认钟声为什么只回应玩家。",
+        complication: "现场线索同时指向玩家和守钟人。",
+        expectedPlayerActions: ["检查碎片", "比对登记册"]
+      },
+      {
+        type: "negotiation",
+        purpose: "让莉瑟决定是否交出公会内部记录。",
+        complication: "她担心玩家会害死自己的兄长。",
+        expectedPlayerActions: ["追问细节", "提出交换条件"]
+      },
+      {
+        type: "confrontation",
+        purpose: "迫使公会承认封锁的真实目的。",
+        complication: "公开真相会让旧神低语提前外溢。",
+        expectedPlayerActions: ["保护证人", "制造公开场合"]
+      }
+    ],
+    consequenceRules: [
+      {
+        trigger: "玩家直接声明已经封住裂隙。",
+        consequence: "降级成高风险尝试，并推进旧神低语外溢。",
+        playerFacingSignal: "钟楼附近的居民开始忘记彼此的名字。"
+      },
+      {
+        trigger: "玩家欺骗莉瑟。",
+        consequence: "莉瑟关系转冷，但会留下带偏见的线索。",
+        playerFacingSignal: "莉瑟交出的记录缺少关键一页。"
+      }
+    ],
+    antiClicheRules: ["不要把旧神写成单纯最终 boss。", "不要用升级刷怪替代钟楼调查。"]
+  };
 }

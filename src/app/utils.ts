@@ -46,26 +46,64 @@ export function formatSavedSessionTime(value: string): string {
 }
 
 export function buildInitialSuggestedMoves(adventure: Adventure): readonly MoveOption[] {
-  const firstNpc = adventure.npcSeeds[0]?.name;
-  const firstLocation = adventure.locations[0]?.name;
+  const moves = buildScenePaletteMoves(adventure).slice(0, 3);
 
-  return [
-    {
-      id: "initial-talk",
-      label: firstNpc ? `尝试向 ${firstNpc} 打探局势` : "尝试寻找愿意交谈的人",
-      intent: firstNpc ? `尝试向 ${firstNpc} 打探局势` : "尝试寻找愿意交谈的人"
-    },
-    {
-      id: "initial-investigate",
-      label: firstLocation ? `谨慎调查 ${firstLocation}` : "谨慎观察周围环境",
-      intent: firstLocation ? `谨慎调查 ${firstLocation}` : "谨慎观察周围环境"
-    },
-    {
-      id: "initial-plan",
-      label: "整理眼前线索，制定下一步计划",
-      intent: "玩家尝试整理眼前线索，再决定推进方向"
+  if (moves.length < 3) {
+    throw new Error("adventure narrative engine must provide at least three initial scene moves");
+  }
+
+  return moves;
+}
+
+function buildScenePaletteMoves(adventure: Adventure): MoveOption[] {
+  return adventure.scenePalette.slice(0, 3).map((scene, index) => {
+    const action = scene.expectedPlayerActions[index % scene.expectedPlayerActions.length] ?? "推进";
+    const normalizedAction = normalizeAttemptAction(action);
+    const sceneType = scene.type.toLocaleLowerCase();
+    const firstNpcName = adventure.npcWeb[index]?.npcName ?? adventure.npcSeeds[0]?.name;
+    const firstLocationName = adventure.locations[index]?.name ?? adventure.locations[0]?.name;
+    const pressureClockName = adventure.pressureClocks[index]?.name ?? adventure.pressureClocks[0]?.name;
+
+    if (/negotiation|relationship|social|交涉|关系/u.test(sceneType) && firstNpcName) {
+      return {
+        id: `initial-scene-${index + 1}`,
+        label: `尝试向 ${firstNpcName} ${normalizedAction}`,
+        intent: `玩家尝试向 ${firstNpcName} ${normalizedAction}，目标是${scene.purpose}`
+      };
     }
-  ];
+
+    if (/investigation|exploration|search|调查|探索/u.test(sceneType) && firstLocationName) {
+      return {
+        id: `initial-scene-${index + 1}`,
+        label: `尝试在 ${firstLocationName} ${normalizedAction}`,
+        intent: `玩家尝试在 ${firstLocationName} ${normalizedAction}，目标是${scene.purpose}`
+      };
+    }
+
+    if (/confrontation|escape|conflict|对峙|逃亡|冲突/u.test(sceneType) && pressureClockName) {
+      return {
+        id: `initial-scene-${index + 1}`,
+        label: `尝试处理「${pressureClockName}」：${normalizedAction}`,
+        intent: `玩家尝试处理「${pressureClockName}」，目标是${scene.purpose}`
+      };
+    }
+
+    return {
+      id: `initial-scene-${index + 1}`,
+      label: `尝试${normalizedAction}，推进「${trimMoveText(scene.purpose)}」`,
+      intent: `玩家尝试${normalizedAction}，目标是${scene.purpose}`
+    };
+  });
+}
+
+function normalizeAttemptAction(action: string): string {
+  return action.replace(/^(尝试|试图|谨慎)\s*/u, "").trim();
+}
+
+function trimMoveText(text: string): string {
+  const normalized = text.trim();
+
+  return normalized.length > 18 ? `${normalized.slice(0, 18)}...` : normalized;
 }
 
 export function buildJourneyMemorySummaryEntries(

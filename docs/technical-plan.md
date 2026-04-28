@@ -92,7 +92,7 @@ mock 不直接写在回合服务里，而是走正式的 `GmProvider` 接口。`
 - `narration`：玩家可见的新剧情。
 - `suggestedMoves`：玩家可见的后续行动，只能描述尝试，不能声明成功结果。
 - `journeyMemoryCandidates`：候选旅途见闻，只保存高置信、玩家已知的信息。
-- `internalStatePatch`：GM 内部状态，允许包含隐藏线索、章节推进判断和私有备注，但不能进入玩家 API 响应。
+- `internalStatePatch`：GM 内部状态，允许包含隐藏线索、章节推进判断、真相揭露、压力时钟、NPC 关系、当前场景状态和私有备注，但不能进入玩家 API 响应。
 
 真实 AI provider 通过环境变量配置：
 
@@ -108,11 +108,13 @@ OPENAI_BASE_URL=https://api.openai.com/v1 # 可选
 AI 接入前先固定 `GM Context Builder`：
 
 - `playerKnownContext`：冒险标题、世界公开前提、开局场景、当前玩家已知的旅途见闻、最近消息、上一轮推荐行动。
-- `gmPrivateContext`：`runtimePrompt`、`hiddenGmNotes`、章节结构、胜败条件、结局触发、GM 内部状态 patch。
+- `gmPrivateContext`：`runtimePrompt`、`hiddenGmNotes`、章节结构、胜败条件、结局触发、`dramaticQuestion`、`revelationLadder`、`npcWeb`、`pressureClocks`、`scenePalette`、`consequenceRules`、`antiClicheRules` 和 GM 内部状态 patch。
 - `currentPlayerInput`：本回合玩家输入、输入模式和意图分类。
 - `outputContract`：模型只能返回 `GmTurnResult` JSON，并遵守不泄露私有信息、不声明玩家行动成功等规则。
 
 真实 AI provider 只能读取完整 context，不能绕过 `GmTurnResult` schema 直接向玩家返回文本。模型名不在代码里写死，避免 provider 或模型升级时修改业务代码。
+
+GM 回合不能只做线性续写。每回合至少要推进一个内部状态维度：真相揭露、NPC 关系、压力时钟、场景目标或当前阶段。玩家看到的是剧情反馈和可尝试行动，内部状态只保存在服务端。
 
 ```txt
 providers/openai-compatible

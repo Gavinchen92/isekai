@@ -40,6 +40,85 @@ const worldSeeds = [
   }
 ];
 
+const narrativeEngine = {
+  dramaticQuestion: "玩家是否愿意牺牲城邦信任来查明召唤事故？",
+  revelationLadder: [
+    {
+      id: "revelation-1",
+      title: "符文只回应玩家",
+      publicClue: "断塔入口的符文在玩家靠近时重新发亮。",
+      hiddenTruth: "玩家不是事故源头，而是旧封印选中的替代钥匙。",
+      unlockHint: "玩家检查符文或承受一次幻听后揭开。"
+    },
+    {
+      id: "revelation-2",
+      title: "书记官隐瞒登记册",
+      publicClue: "莉瑟的登记册缺少事故当夜最后一页。",
+      hiddenTruth: "她知道守塔人最后见过谁。",
+      unlockHint: "玩家取得莉瑟信任或找到残页后揭开。"
+    },
+    {
+      id: "revelation-3",
+      title: "公会封锁另有目的",
+      publicClue: "封锁令只抓召唤者，没有疏散高塔附近居民。",
+      hiddenTruth: "公会高层想掩盖第一次封印事故。",
+      unlockHint: "玩家进入终局或压力时钟推进后揭开。"
+    }
+  ],
+  npcWeb: [
+    {
+      npcName: "莉瑟",
+      desire: "查明事故并保住书记官身份。",
+      fear: "玩家公开真相后她被公会清算。",
+      leverage: "她能调取召唤事故登记册。",
+      secret: "她知道守塔人并未正常离开。",
+      relationshipToPlayer: "她需要玩家行动，但不完全信任玩家。"
+    }
+  ],
+  pressureClocks: [
+    {
+      id: "clock-1",
+      name: "公会封锁",
+      stage: "active",
+      trigger: "玩家公开使用符文能力或拖延调查。",
+      nextConsequence: "公会会缩小行动范围并逮捕更多召唤者。"
+    }
+  ],
+  scenePalette: [
+    {
+      type: "investigation",
+      purpose: "确认符文为什么只回应玩家。",
+      complication: "现场线索同时指向玩家和守塔人。",
+      expectedPlayerActions: ["检查符文", "比对登记册"]
+    },
+    {
+      type: "negotiation",
+      purpose: "让莉瑟决定是否交出公会内部记录。",
+      complication: "她担心玩家会害死自己的线人。",
+      expectedPlayerActions: ["追问细节", "交换登记册线索"]
+    },
+    {
+      type: "confrontation",
+      purpose: "迫使公会承认封锁的真实目的。",
+      complication: "公开真相会让旧封印提前外溢。",
+      expectedPlayerActions: ["保护证人", "制造公开场合"]
+    }
+  ],
+  consequenceRules: [
+    {
+      trigger: "玩家直接声明已经封住裂隙。",
+      consequence: "降级成高风险尝试并推进封锁。",
+      playerFacingSignal: "高塔附近的居民开始忘记彼此的名字。"
+    },
+    {
+      trigger: "玩家欺骗莉瑟。",
+      consequence: "莉瑟关系转冷，但会留下带偏见的线索。",
+      playerFacingSignal: "莉瑟交出的记录缺少关键一页。"
+    }
+  ],
+  antiClicheRules: ["不要把旧封印写成单纯最终 boss。", "不要用升级刷怪替代断塔调查。"]
+};
+
 const candidates = [
   {
     id: "isekai-candidate-1",
@@ -63,6 +142,7 @@ const candidates = [
     openingScene: "银色符文在脚下熄灭。",
     worldPremise: "异世界冒险。",
     mainConflict: "召唤事故释放旧封印。",
+    ...narrativeEngine,
     storyArc: {
       acts: [
         {

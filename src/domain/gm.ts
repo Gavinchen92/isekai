@@ -31,6 +31,32 @@ export const GmJourneyMemoryCandidateSchema = z.object({
 export const GmInternalStatePatchSchema = z.object({
   currentAct: StoryActNameSchema.optional(),
   flags: z.array(z.string().min(1)).default([]),
+  revealedTruthIds: z.array(z.string().min(1)).optional(),
+  pressureClockUpdates: z
+    .array(
+      z.object({
+        clockId: z.string().min(1),
+        status: z.enum(["unchanged", "advanced", "resolved", "critical"]),
+        note: z.string().min(1)
+      })
+    )
+    .optional(),
+  npcRelationshipUpdates: z
+    .array(
+      z.object({
+        npcName: z.string().min(1),
+        disposition: z.enum(["warmer", "colder", "guarded", "hostile", "loyal", "unknown"]),
+        note: z.string().min(1)
+      })
+    )
+    .optional(),
+  sceneState: z
+    .object({
+      sceneType: z.string().min(1),
+      pressure: z.enum(["low", "medium", "high"]),
+      unresolvedQuestion: z.string().min(1)
+    })
+    .optional(),
   privateNotes: z.array(z.string().min(1)).default([])
 });
 

@@ -61,6 +61,9 @@ describe("mockGmProvider", () => {
     expect(result.journeyMemoryCandidates.some((candidate) => candidate.type === "clue")).toBe(
       true
     );
+    expect(result.internalStatePatch.revealedTruthIds?.[0]).toContain("revelation");
+    expect(result.internalStatePatch.pressureClockUpdates?.[0]?.clockId).toContain("clock");
+    expect(result.internalStatePatch.sceneState?.sceneType).toBe("investigation");
     expect(result.internalStatePatch.privateNotes.join("\n")).toContain("隐藏 GM 线索");
   });
 

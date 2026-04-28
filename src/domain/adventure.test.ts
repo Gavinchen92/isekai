@@ -27,6 +27,7 @@ const baseCandidate = {
   openingScene: "暮色压低时，钟楼响起第十三声。",
   worldPremise: "边境领地夹在王国和荒原之间，旧教会仍掌握秘密。",
   mainConflict: "失踪骑士牵出边境叛乱和旧教会封印。",
+  dramaticQuestion: "玩家是否愿意牺牲小镇秩序来揭开骑士失踪的真相？",
   storyArc: {
     acts: [
       {
@@ -94,6 +95,81 @@ const baseCandidate = {
       publicDescription: "她知道每个陌生人进镇的时间。"
     }
   ],
+  revelationLadder: [
+    {
+      id: "revelation-1",
+      title: "钟声并非来自钟楼",
+      publicClue: "钟声响起时钟楼的大钟没有晃动。",
+      hiddenTruth: "真正的钟声来自地下封印。",
+      unlockHint: "玩家检查钟楼结构后揭开。"
+    },
+    {
+      id: "revelation-2",
+      title: "失踪骑士留下误导",
+      publicClue: "骑士徽章出现在不该出现的旧教堂。",
+      hiddenTruth: "骑士主动藏身，试图拖延叛乱爆发。",
+      unlockHint: "玩家比对徽章和教会记录后揭开。"
+    },
+    {
+      id: "revelation-3",
+      title: "封印与叛乱互相牵制",
+      publicClue: "叛乱者避开了最容易攻破的钟楼门。",
+      hiddenTruth: "双方都害怕破坏地下封印。",
+      unlockHint: "玩家进入终局前揭开。"
+    }
+  ],
+  npcWeb: [
+    {
+      npcName: "玛拉",
+      desire: "保住酒馆和镇民的退路。",
+      fear: "玩家公开真相后小镇被清洗。",
+      leverage: "她知道骑士最后见过谁。",
+      secret: "她藏起了一名叛乱信使。",
+      relationshipToPlayer: "她愿意帮忙，但会先试探玩家。"
+    }
+  ],
+  pressureClocks: [
+    {
+      id: "clock-1",
+      name: "边境戒严",
+      stage: "active",
+      trigger: "玩家拖延调查或惊动教会。",
+      nextConsequence: "王国军队会封锁小镇。"
+    }
+  ],
+  scenePalette: [
+    {
+      type: "investigation",
+      purpose: "确认钟声真正来源。",
+      complication: "钟楼和地下封印给出矛盾线索。",
+      expectedPlayerActions: ["检查钟楼", "寻找地下入口"]
+    },
+    {
+      type: "negotiation",
+      purpose: "让玛拉交出骑士最后行踪。",
+      complication: "她担心镇民被清算。",
+      expectedPlayerActions: ["建立信任", "交换保护承诺"]
+    },
+    {
+      type: "confrontation",
+      purpose: "阻止教会提前开启清洗。",
+      complication: "公开证据会刺激叛乱者行动。",
+      expectedPlayerActions: ["保护证人", "揭露证据"]
+    }
+  ],
+  consequenceRules: [
+    {
+      trigger: "玩家直接声明解决封印。",
+      consequence: "降级成高风险尝试并推进戒严。",
+      playerFacingSignal: "镇口开始增派士兵。"
+    },
+    {
+      trigger: "玩家欺骗玛拉。",
+      consequence: "玛拉关系转冷，只提供不完整线索。",
+      playerFacingSignal: "她交出的名单缺少最后一页。"
+    }
+  ],
+  antiClicheRules: ["不要把旧教会写成单纯邪教。", "不要让骑士只承担失踪道具功能。"],
   toneGuidelines: "保持悬疑和低魔氛围。",
   hiddenGmNotes: "钟声来自地下封印，不是钟楼。",
   runtimePrompt: "围绕边境小镇、失踪骑士和旧教会推进故事。",
