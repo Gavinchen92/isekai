@@ -26,7 +26,11 @@ import {
   type OpenAiCompatibleProviderConfig
 } from "./gm/openai-compatible";
 import { listWorldSeedPresets } from "./world-seeds";
-import { logEvent } from "../shared/logger";
+import {
+  logAiStructuredOutputParseFailure,
+  logEvent,
+  type LogContext
+} from "../shared/logger";
 import { z } from "zod";
 
 type CandidateBlueprint = {
@@ -139,6 +143,7 @@ type StoredAdventureCandidate = {
 };
 
 type GenerateAdventureCandidateOptions = {
+  logContext?: LogContext;
   signal?: AbortSignal;
 };
 
@@ -148,6 +153,7 @@ type PreviewConceptGenerationInput = {
   previewConfig: AdventureCandidatePreviewRequestConfig;
   request: AdventureCandidateGenerationRequest;
   seed: WorldSeedPreset;
+  logContext?: LogContext;
   signal?: AbortSignal;
   variantFocus: AdventureCandidatePreviewVariantFocus;
   variantIndex: number;
@@ -633,14 +639,20 @@ export async function generateOpenAiCompatibleAdventureCandidates(
 ): Promise<readonly AdventureCandidate[]> {
   const seed = getWorldSeed(request.worldSeedId);
   const config = resolveOpenAiCompatibleProviderConfig();
+  const logContext: LogContext = {
+    ...options.logContext,
+    operation: options.logContext?.operation ?? "adventure_candidate_generation",
+    worldSeedId: options.logContext?.worldSeedId ?? request.worldSeedId
+  };
   const content = await requestOpenAiCompatibleJsonObject({
     config,
     label: "OpenAI-compatible adventure candidate",
+    logContext,
     messages: buildAdventureCandidatePromptMessages(seed, request),
     signal: options.signal
   });
 
-  return parseAdventureCandidateDraftJson(seed, request, content);
+  return parseAdventureCandidateDraftJson(seed, request, content, logContext);
 }
 
 export async function generateOpenAiCompatibleAdventureCandidateConcepts(
@@ -657,6 +669,11 @@ export async function generateOpenAiCompatibleAdventureCandidateConcepts(
       previewConfig,
       request,
       seed,
+      logContext: {
+        ...options.logContext,
+        operation: options.logContext?.operation ?? "adventure_candidate_preview_generation",
+        worldSeedId: options.logContext?.worldSeedId ?? request.worldSeedId
+      },
       signal: options.signal
     })
   );
@@ -700,6 +717,7 @@ async function generateOpenAiCompatibleAdventureCandidateConcept(
   const content = await requestOpenAiCompatibleJsonObject({
     config: input.config,
     label: "OpenAI-compatible adventure candidate preview",
+    logContext: input.logContext,
     messages: buildAdventureCandidateConceptPromptMessages(input.seed, input.request, {
       avoidTitles: input.avoidTitles,
       variantFocus: input.variantFocus,
@@ -710,7 +728,12 @@ async function generateOpenAiCompatibleAdventureCandidateConcept(
     temperature: input.previewConfig.temperature,
     thinking: input.previewConfig.thinking
   });
-  const [concept] = parseAdventureCandidateConceptDraftJson(input.seed, input.request, content);
+  const [concept] = parseAdventureCandidateConceptDraftJson(
+    input.seed,
+    input.request,
+    content,
+    input.logContext
+  );
 
   if (!concept) {
     throw new Error("OpenAI-compatible adventure candidate preview response is empty");
@@ -788,11 +811,13 @@ function createPreviewConceptGenerationInput(input: {
   previewConfig: AdventureCandidatePreviewRequestConfig;
   request: AdventureCandidateGenerationRequest;
   seed: WorldSeedPreset;
+  logContext?: LogContext;
   signal?: AbortSignal;
 }): PreviewConceptGenerationInput {
   return {
     avoidTitles: [],
     config: input.config,
+    logContext: input.logContext,
     previewConfig: input.previewConfig,
     request: {
       ...input.request,
@@ -844,60 +869,120 @@ export async function generateOpenAiCompatibleAdventureCandidateFromConcept(
 ): Promise<AdventureCandidate> {
   const seed = getWorldSeed(storedCandidate.worldSeedId);
   const config = resolveOpenAiCompatibleProviderConfig();
+  const logContext: LogContext = {
+    ...options.logContext,
+    operation: options.logContext?.operation ?? "adventure_candidate_full_generation",
+    worldSeedId: options.logContext?.worldSeedId ?? storedCandidate.worldSeedId
+  };
   const content = await requestOpenAiCompatibleJsonObject({
     config,
     label: "OpenAI-compatible adventure candidate full",
+    logContext,
     messages: buildAdventureCandidateDetailPromptMessages(seed, storedCandidate),
     signal: options.signal
   });
 
-  return parseAdventureCandidateDetailDraftJson(seed, storedCandidate.concept, content);
+  return parseAdventureCandidateDetailDraftJson(
+    seed,
+    storedCandidate.concept,
+    content,
+    logContext
+  );
 }
 
 export function parseAdventureCandidateConceptDraftJson(
   seed: WorldSeedPreset,
   request: AdventureCandidateGenerationRequest,
-  content: string
+  content: string,
+  logContext: LogContext = {}
 ): readonly AdventureCandidateConcept[] {
   let parsedJson: unknown;
 
   try {
     parsedJson = JSON.parse(content.trim());
   } catch (error) {
-    throw new Error(
+    const parseError = new Error(
       `OpenAI-compatible adventure candidate preview response is not valid JSON: ${
         error instanceof Error ? error.message : String(error)
       }`
     );
+
+    logAiStructuredOutputParseFailure({
+      ...logContext,
+      content,
+      error: parseError,
+      schemaName: "AdventureCandidateConceptDraftResponse",
+      worldSeedId: logContext.worldSeedId ?? request.worldSeedId
+    });
+    throw parseError;
   }
 
-  const parsedResponse = AdventureCandidateConceptDraftResponseSchema.parse(parsedJson);
+  const parsedResponse = parseSchemaOrLog(
+    AdventureCandidateConceptDraftResponseSchema,
+    parsedJson,
+    {
+      content,
+      logContext: {
+        ...logContext,
+        worldSeedId: logContext.worldSeedId ?? request.worldSeedId
+      },
+      schemaName: "AdventureCandidateConceptDraftResponse"
+    }
+  );
   const requestId = `${seed.id}-request-preview-${crypto.randomUUID()}`;
   const concepts = parsedResponse.candidates
     .slice(0, request.candidateCount)
     .map((draft, index) => buildAdventureCandidateConceptFromDraft(seed, requestId, draft, index));
 
-  return AdventureCandidateConceptSchema.array().min(1).max(3).parse(concepts);
+  return parseSchemaOrLog(AdventureCandidateConceptSchema.array().min(1).max(3), concepts, {
+    content,
+    logContext: {
+      ...logContext,
+      worldSeedId: logContext.worldSeedId ?? request.worldSeedId
+    },
+    schemaName: "AdventureCandidateConceptList"
+  });
 }
 
 export function parseAdventureCandidateDetailDraftJson(
   seed: WorldSeedPreset,
   concept: AdventureCandidateConcept,
-  content: string
+  content: string,
+  logContext: LogContext = {}
 ): AdventureCandidate {
   let parsedJson: unknown;
 
   try {
     parsedJson = JSON.parse(content.trim());
   } catch (error) {
-    throw new Error(
+    const parseError = new Error(
       `OpenAI-compatible adventure candidate full response is not valid JSON: ${
         error instanceof Error ? error.message : String(error)
       }`
     );
+
+    logAiStructuredOutputParseFailure({
+      ...logContext,
+      content,
+      error: parseError,
+      schemaName: "AdventureCandidateDetailDraftResponse",
+      worldSeedId: logContext.worldSeedId ?? seed.id
+    });
+    throw parseError;
   }
 
-  const parsedResponse = AdventureCandidateDetailDraftResponseSchema.parse(parsedJson);
+  const parsedResponse = parseSchemaOrLog(
+    AdventureCandidateDetailDraftResponseSchema,
+    parsedJson,
+    {
+      content,
+      logContext: {
+        ...logContext,
+        worldSeedId: logContext.worldSeedId ?? seed.id
+      },
+      schemaName: "AdventureCandidateDetailDraftResponse"
+    }
+  );
 
   return buildAdventureCandidateFromDetailDraft(seed, concept, parsedResponse.adventure);
 }
@@ -905,27 +990,76 @@ export function parseAdventureCandidateDetailDraftJson(
 export function parseAdventureCandidateDraftJson(
   seed: WorldSeedPreset,
   request: AdventureCandidateGenerationRequest,
-  content: string
+  content: string,
+  logContext: LogContext = {}
 ): readonly AdventureCandidate[] {
   let parsedJson: unknown;
 
   try {
     parsedJson = JSON.parse(content.trim());
   } catch (error) {
-    throw new Error(
+    const parseError = new Error(
       `OpenAI-compatible adventure candidate response is not valid JSON: ${
         error instanceof Error ? error.message : String(error)
       }`
     );
+
+    logAiStructuredOutputParseFailure({
+      ...logContext,
+      content,
+      error: parseError,
+      schemaName: "AdventureCandidateDraftResponse",
+      worldSeedId: logContext.worldSeedId ?? request.worldSeedId
+    });
+    throw parseError;
   }
 
-  const parsedResponse = AdventureCandidateDraftResponseSchema.parse(parsedJson);
+  const parsedResponse = parseSchemaOrLog(AdventureCandidateDraftResponseSchema, parsedJson, {
+    content,
+    logContext: {
+      ...logContext,
+      worldSeedId: logContext.worldSeedId ?? request.worldSeedId
+    },
+    schemaName: "AdventureCandidateDraftResponse"
+  });
   const requestId = `${seed.id}-request-ai-${crypto.randomUUID()}`;
   const candidates = parsedResponse.candidates
     .slice(0, request.candidateCount)
     .map((draft, index) => buildAdventureCandidateFromDraft(seed, requestId, draft, index));
 
-  return AdventureCandidateListSchema.parse(candidates);
+  return parseSchemaOrLog(AdventureCandidateListSchema, candidates, {
+    content,
+    logContext: {
+      ...logContext,
+      worldSeedId: logContext.worldSeedId ?? request.worldSeedId
+    },
+    schemaName: "AdventureCandidateList"
+  });
+}
+
+function parseSchemaOrLog<T>(
+  schema: z.ZodType<T>,
+  value: unknown,
+  input: {
+    content: string;
+    logContext: LogContext;
+    schemaName: string;
+  }
+): T {
+  const result = schema.safeParse(value);
+
+  if (!result.success) {
+    logAiStructuredOutputParseFailure({
+      ...input.logContext,
+      content: input.content,
+      error: result.error,
+      parsedJson: value,
+      schemaName: input.schemaName
+    });
+    throw result.error;
+  }
+
+  return result.data;
 }
 
 function buildAdventureCandidatePromptMessages(

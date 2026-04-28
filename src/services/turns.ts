@@ -14,10 +14,19 @@ import {
   type TurnStreamEvent
 } from "../domain";
 import { getAdventure } from "./adventures";
-import { getGmProvider, type GmUserMessage } from "./gm/provider";
+import { getGmProvider, type GmTurnInput, type GmUserMessage } from "./gm/provider";
 import { classifyPlayerInput } from "./input-intent";
 import * as journeyMemoryService from "./journey-memory";
-import { getSession } from "./sessions";
+import { getSession, updateSessionAfterTurn } from "./sessions";
+import type { LogContext } from "../shared/logger";
+import {
+  loadGmInternalStatePatchesForSession,
+  loadMessagesForSession,
+  loadSuggestedMovesForSession,
+  saveGmInternalStatePatchesForSession,
+  saveMessagesForSession,
+  saveSuggestedMovesForSession
+} from "../storage/persistence";
 
 const messagesBySession = new Map<string, Message[]>();
 const suggestedMovesBySession = new Map<string, SuggestedMove[]>();
@@ -36,7 +45,12 @@ export type TurnPostProcessResult =
     };
 
 type CreateTurnOptions = {
+  logContext?: LogContext;
   onJourneyMemoryPostProcessSettled?: (result: TurnPostProcessResult) => void;
+};
+
+type CreateTurnStreamOptions = {
+  logContext?: LogContext;
 };
 
 function createId(prefix: string): string {
@@ -64,12 +78,19 @@ export async function createTurn(
   rawRequest: unknown,
   options: CreateTurnOptions = {}
 ): Promise<TurnResponse> {
-  const context = await prepareTurnContext(rawRequest);
+  const context = await prepareTurnContext(rawRequest, {
+    logContext: {
+      ...options.logContext,
+      operation: options.logContext?.operation ?? "turn_generation"
+    }
+  });
+  const logContext = buildTurnLogContext(context, options.logContext, "turn_generation");
   const gmResult = await getGmProvider().generateTurn({
     adventure: context.adventure,
     session: getSessionOrThrow(context.request.sessionId),
     userMessage: context.userMessage,
     journeyMemory: journeyMemoryService.listJourneyMemory(context.sessionId),
+    logContext,
     messageHistory: context.messageHistory,
     previousInternalStatePatches: context.previousInternalStatePatches,
     previousSuggestedMoves: context.previousSuggestedMoves
@@ -80,30 +101,63 @@ export async function createTurn(
   return artifacts.response;
 }
 
-export async function* createTurnStream(rawRequest: unknown): AsyncGenerator<TurnStreamEvent> {
-  const context = await prepareTurnContext(rawRequest);
+export async function* createTurnStream(
+  rawRequest: unknown,
+  options: CreateTurnStreamOptions = {}
+): AsyncGenerator<TurnStreamEvent> {
+  const context = await prepareTurnContext(rawRequest, {
+    logContext: {
+      ...options.logContext,
+      operation: options.logContext?.operation ?? "turn_stream"
+    }
+  });
+  const logContext = buildTurnLogContext(context, options.logContext, "turn_stream");
   const assistantMessageId = createId("message");
+  const provider = getGmProvider();
 
   yield TurnStreamEventSchema.parse({
     type: "turn_started",
     userMessage: context.parsedUserMessage
   });
 
-  const gmResult = await getGmProvider().generateTurn({
+  const gmInput: GmTurnInput = {
     adventure: context.adventure,
     session: getSessionOrThrow(context.request.sessionId),
     userMessage: context.userMessage,
     journeyMemory: journeyMemoryService.listJourneyMemory(context.sessionId),
+    logContext,
     messageHistory: context.messageHistory,
     previousInternalStatePatches: context.previousInternalStatePatches,
     previousSuggestedMoves: context.previousSuggestedMoves
-  });
+  };
+  let gmResult: GmTurnResult | undefined;
 
-  yield TurnStreamEventSchema.parse({
-    type: "narration_chunk",
-    assistantMessageId,
-    chunk: gmResult.narration
-  });
+  if (provider.streamTurn) {
+    for await (const event of provider.streamTurn(gmInput)) {
+      if (event.type === "narration_chunk") {
+        yield TurnStreamEventSchema.parse({
+          type: "narration_chunk",
+          assistantMessageId,
+          chunk: event.chunk
+        });
+        continue;
+      }
+
+      gmResult = event.result;
+    }
+  } else {
+    gmResult = await provider.generateTurn(gmInput);
+
+    yield TurnStreamEventSchema.parse({
+      type: "narration_chunk",
+      assistantMessageId,
+      chunk: gmResult.narration
+    });
+  }
+
+  if (!gmResult) {
+    throw new Error("GM stream did not complete");
+  }
 
   const artifacts = finalizeTurnFromGmResult(context, gmResult, assistantMessageId);
 
@@ -119,15 +173,51 @@ export async function* createTurnStream(rawRequest: unknown): AsyncGenerator<Tur
 }
 
 export function listMessages(sessionId: string): readonly Message[] {
-  return messagesBySession.get(sessionId) ?? [];
+  const cachedMessages = messagesBySession.get(sessionId);
+
+  if (cachedMessages) {
+    return cachedMessages;
+  }
+
+  const persistedMessages = loadMessagesForSession(sessionId);
+
+  if (persistedMessages.length > 0) {
+    messagesBySession.set(sessionId, [...persistedMessages]);
+  }
+
+  return persistedMessages;
 }
 
 export function listSuggestedMoves(sessionId: string): readonly SuggestedMove[] {
-  return suggestedMovesBySession.get(sessionId) ?? [];
+  const cachedMoves = suggestedMovesBySession.get(sessionId);
+
+  if (cachedMoves) {
+    return cachedMoves;
+  }
+
+  const persistedMoves = loadSuggestedMovesForSession(sessionId);
+
+  if (persistedMoves.length > 0) {
+    suggestedMovesBySession.set(sessionId, [...persistedMoves]);
+  }
+
+  return persistedMoves;
 }
 
 export function listGmInternalStatePatches(sessionId: string): readonly GmInternalStatePatch[] {
-  return gmInternalStatePatchesBySession.get(sessionId) ?? [];
+  const cachedPatches = gmInternalStatePatchesBySession.get(sessionId);
+
+  if (cachedPatches) {
+    return cachedPatches;
+  }
+
+  const persistedPatches = loadGmInternalStatePatchesForSession(sessionId);
+
+  if (persistedPatches.length > 0) {
+    gmInternalStatePatchesBySession.set(sessionId, [...persistedPatches]);
+  }
+
+  return persistedPatches;
 }
 
 export function refreshJourneyMemoryForSession(sessionId: string) {
@@ -143,7 +233,7 @@ export function refreshJourneyMemoryForSession(sessionId: string) {
     throw new Error(`adventure not found: ${session.adventureId}`);
   }
 
-  const messages = messagesBySession.get(sessionId) ?? [];
+  const messages = listMessages(sessionId);
 
   for (let index = 0; index < messages.length; index += 2) {
     const userMessage = messages[index];
@@ -200,7 +290,10 @@ function enqueueJourneyMemoryPostProcess(
   return nextTask;
 }
 
-async function prepareTurnContext(rawRequest: unknown): Promise<PreparedTurnContext> {
+async function prepareTurnContext(
+  rawRequest: unknown,
+  options: { logContext?: LogContext } = {}
+): Promise<PreparedTurnContext> {
   const request: CreateTurnRequest = CreateTurnRequestSchema.parse(rawRequest);
   const session = getSessionOrThrow(request.sessionId);
   const adventure = getAdventure(session.adventureId);
@@ -210,10 +303,19 @@ async function prepareTurnContext(rawRequest: unknown): Promise<PreparedTurnCont
   }
 
   const now = new Date().toISOString();
-  const inputIntent = await classifyPlayerInput({
-    content: request.content,
-    inputKind: request.inputKind
-  });
+  const inputIntent = await classifyPlayerInput(
+    {
+      content: request.content,
+      inputKind: request.inputKind
+    },
+    {
+      logContext: {
+        ...options.logContext,
+        sessionId: options.logContext?.sessionId ?? session.id,
+        worldSeedId: options.logContext?.worldSeedId ?? adventure.worldSeedId
+      }
+    }
+  );
   const inferredIntent = inputIntent.intent;
   const parsedUserMessage = MessageSchema.parse({
     id: createId("message"),
@@ -240,9 +342,9 @@ async function prepareTurnContext(rawRequest: unknown): Promise<PreparedTurnCont
     adventure,
     parsedUserMessage,
     userMessage,
-    messageHistory: messagesBySession.get(session.id) ?? [],
-    previousSuggestedMoves: suggestedMovesBySession.get(session.id) ?? [],
-    previousInternalStatePatches: gmInternalStatePatchesBySession.get(session.id) ?? []
+    messageHistory: listMessages(session.id),
+    previousSuggestedMoves: listSuggestedMoves(session.id),
+    previousInternalStatePatches: listGmInternalStatePatches(session.id)
   };
 }
 
@@ -268,10 +370,24 @@ function finalizeTurnFromGmResult(
 
   messagesBySession.set(context.sessionId, messages);
   suggestedMovesBySession.set(context.sessionId, suggestedMoves);
-  gmInternalStatePatchesBySession.set(context.sessionId, [
-    ...(gmInternalStatePatchesBySession.get(context.sessionId) ?? []),
+  saveMessagesForSession(context.sessionId, messages);
+  saveSuggestedMovesForSession(context.sessionId, suggestedMoves);
+
+  const nextInternalStatePatches = [
+    ...listGmInternalStatePatches(context.sessionId),
     gmResult.internalStatePatch
-  ]);
+  ];
+
+  gmInternalStatePatchesBySession.set(context.sessionId, nextInternalStatePatches);
+  saveGmInternalStatePatchesForSession(context.sessionId, nextInternalStatePatches);
+  updateSessionAfterTurn(
+    context.sessionId,
+    gmResult.internalStatePatch.currentAct
+      ? {
+          currentAct: gmResult.internalStatePatch.currentAct
+        }
+      : undefined
+  );
   const journeyMemoryPostProcessStartedAt = performance.now();
   void enqueueJourneyMemoryPostProcess(context.sessionId, async () => {
     journeyMemoryService.extractJourneyMemoryFromTurn(context.sessionId, {
@@ -305,6 +421,19 @@ function finalizeTurnFromGmResult(
     assistantMessage,
     suggestedMoves,
     response
+  };
+}
+
+function buildTurnLogContext(
+  context: PreparedTurnContext,
+  logContext: LogContext | undefined,
+  defaultOperation: string
+): LogContext {
+  return {
+    ...logContext,
+    operation: logContext?.operation ?? defaultOperation,
+    sessionId: logContext?.sessionId ?? context.sessionId,
+    worldSeedId: logContext?.worldSeedId ?? context.adventure.worldSeedId
   };
 }
 

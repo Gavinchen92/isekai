@@ -7,8 +7,9 @@ import {
   CreateTurnRequestSchema
 } from "../domain";
 import { generateAdventureCandidatePreviews } from "../services/adventure-candidates";
-import { createAdventure } from "../services/adventures";
+import { createAdventure, getAdventure } from "../services/adventures";
 import { listJourneyMemory } from "../services/journey-memory";
+import { getLatestSessionSnapshot, getSessionSnapshot } from "../services/session-snapshots";
 import { createSession, getSession } from "../services/sessions";
 import { createTurn, createTurnStream, refreshJourneyMemoryForSession } from "../services/turns";
 import { listWorldSeedPresets } from "../services/world-seeds";
@@ -50,6 +51,11 @@ export function createServer() {
 
     try {
       const candidates = await generateAdventureCandidatePreviews(parsedRequest.data, {
+        logContext: {
+          operation: "adventure_candidate_preview_generation",
+          requestId: request.id,
+          worldSeedId: parsedRequest.data.worldSeedId
+        },
         signal: createReplyAbortSignal(reply)
       });
 
@@ -102,6 +108,11 @@ export function createServer() {
 
     try {
       return await createAdventure(parsedRequest.data, {
+        logContext: {
+          operation: "adventure_generation",
+          requestId: request.id,
+          worldSeedId: parsedRequest.data.worldSeedId
+        },
         signal: createReplyAbortSignal(reply)
       });
     } catch (error: unknown) {
@@ -150,6 +161,18 @@ export function createServer() {
       });
     }
   });
+  server.get("/api/adventures/:adventureId", async (request, reply) => {
+    const { adventureId } = request.params as { adventureId: string };
+    const adventure = getAdventure(adventureId);
+
+    if (!adventure) {
+      return reply.status(404).send({
+        error: "Adventure not found"
+      });
+    }
+
+    return adventure;
+  });
   server.post("/api/sessions", async (request, reply) => {
     const parsedRequest = CreateSessionRequestSchema.safeParse(request.body);
 
@@ -171,6 +194,29 @@ export function createServer() {
 
       throw error;
     }
+  });
+  server.get("/api/sessions/latest", async (_request, reply) => {
+    const snapshot = getLatestSessionSnapshot();
+
+    if (!snapshot) {
+      return reply.status(404).send({
+        error: "Session not found"
+      });
+    }
+
+    return snapshot;
+  });
+  server.get("/api/sessions/:sessionId", async (request, reply) => {
+    const { sessionId } = request.params as { sessionId: string };
+    const snapshot = getSessionSnapshot(sessionId);
+
+    if (!snapshot) {
+      return reply.status(404).send({
+        error: "Session not found"
+      });
+    }
+
+    return snapshot;
   });
   server.get("/api/sessions/:sessionId/journey-memory", async (request, reply) => {
     const { sessionId } = request.params as { sessionId: string };
@@ -222,6 +268,11 @@ export function createServer() {
 
     try {
       const turn = await createTurn(parsedRequest.data, {
+        logContext: {
+          operation: "turn_generation",
+          requestId: request.id,
+          sessionId: parsedRequest.data.sessionId
+        },
         onJourneyMemoryPostProcessSettled: (result) => {
           if (result.status === "completed") {
             request.log.info(
@@ -324,7 +375,13 @@ export function createServer() {
     };
 
     try {
-      for await (const event of createTurnStream(parsedRequest.data)) {
+      for await (const event of createTurnStream(parsedRequest.data, {
+        logContext: {
+          operation: "turn_stream",
+          requestId: request.id,
+          sessionId: parsedRequest.data.sessionId
+        }
+      })) {
         sendEvent(event);
       }
 

@@ -143,12 +143,13 @@ describe("createTurnStream", () => {
       events.push(event);
     }
 
-    expect(events.map((event) => event.type)).toEqual([
-      "turn_started",
-      "narration_chunk",
-      "suggested_moves_ready",
-      "turn_completed"
-    ]);
+    const narrationChunks = events.filter((event) => event.type === "narration_chunk");
+
+    expect(events[0]?.type).toBe("turn_started");
+    expect(narrationChunks.length).toBeGreaterThan(1);
+    expect(new Set(narrationChunks.map((event) => event.assistantMessageId)).size).toBe(1);
+    expect(events.at(-2)?.type).toBe("suggested_moves_ready");
+    expect(events.at(-1)?.type).toBe("turn_completed");
     expect(listMessages(session.id)).toHaveLength(2);
     expect(listSuggestedMoves(session.id)).toHaveLength(3);
     expect(listGmInternalStatePatches(session.id)).toHaveLength(1);

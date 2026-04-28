@@ -2,6 +2,7 @@ import {
   AdventureSchema,
   AdventureCandidatePreviewListSchema,
   JourneyMemoryEntryListSchema,
+  SessionSnapshotSchema,
   SessionSchema,
   TurnStreamEventSchema,
   TurnResponseSchema,
@@ -11,6 +12,7 @@ import {
   type JourneyMemoryEntry,
   type MessageInputKind,
   type Session,
+  type SessionSnapshot,
   type TurnResponse,
   type TurnStreamEvent,
   WorldSeedPresetListSchema,
@@ -94,6 +96,30 @@ export async function createSession(adventureId: string): Promise<Session> {
   }
 
   return SessionSchema.parse(await response.json());
+}
+
+export async function fetchLatestSessionSnapshot(): Promise<SessionSnapshot | undefined> {
+  const response = await fetch("/api/sessions/latest");
+
+  if (response.status === 404) {
+    return undefined;
+  }
+
+  if (!response.ok) {
+    throw new Error(`fetch latest session failed: ${response.status}`);
+  }
+
+  return SessionSnapshotSchema.parse(await response.json());
+}
+
+export async function fetchSessionSnapshot(sessionId: string): Promise<SessionSnapshot> {
+  const response = await fetch(`/api/sessions/${sessionId}`);
+
+  if (!response.ok) {
+    throw new Error(`fetch session ${sessionId} failed: ${response.status}`);
+  }
+
+  return SessionSnapshotSchema.parse(await response.json());
 }
 
 export async function fetchJourneyMemory(sessionId: string): Promise<readonly JourneyMemoryEntry[]> {

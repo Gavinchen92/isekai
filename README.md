@@ -25,9 +25,9 @@
 
 ## 开发
 
-当前实现：React + TypeScript + Vite + Fastify + Zod，存储先用内存 repository 跑通闭环。
+当前实现：React + TypeScript + Vite + Fastify + Zod，本地存档使用 SQLite，临时冒险候选仍保留在内存中。
 
-目标存储：SQLite。SQLite 相关设计仍按 `docs/technical-plan.md` 推进，但当前代码还没有真实数据库层。
+默认数据库路径为 `data/isekai.sqlite`，可以通过 `ISEKAI_DB_PATH` 覆盖。
 
 ```bash
 pnpm install

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { StoryActNameSchema } from "./adventure";
+import { AdventureSchema, StoryActNameSchema } from "./adventure";
 
 export const PlayerInputIntentSchema = z.enum([
   "character_action",
@@ -97,6 +97,13 @@ export const TurnResponseSchema = z.object({
   phase: TurnPhaseSchema.optional()
 });
 
+export const SessionSnapshotSchema = z.object({
+  session: SessionSchema,
+  adventure: AdventureSchema,
+  messages: z.array(MessageSchema),
+  suggestedMoves: z.array(SuggestedMoveSchema)
+});
+
 export const TurnStreamStartedEventSchema = z.object({
   type: z.literal("turn_started"),
   userMessage: MessageSchema
@@ -136,3 +143,4 @@ export type Message = z.infer<typeof MessageSchema>;
 export type SuggestedMove = z.infer<typeof SuggestedMoveSchema>;
 export type TurnResponse = z.infer<typeof TurnResponseSchema>;
 export type TurnStreamEvent = z.infer<typeof TurnStreamEventSchema>;
+export type SessionSnapshot = z.infer<typeof SessionSnapshotSchema>;

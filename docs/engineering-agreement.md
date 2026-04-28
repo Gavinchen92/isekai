@@ -52,10 +52,10 @@
 - `domain`：Adventure、Session、StoryArc、Log、Rule 等纯业务模型。
 - `services`：生成冒险、推进剧情、生成建议动作、更新日志。
 - `providers`：目标层，负责 OpenAI-compatible，后续可接 Ollama / LM Studio。当前 provider 先放在 `src/services/gm`。
-- `storage`：目标层，负责 SQLite、导入导出。当前先用内存 repository。
+- `storage`：负责 SQLite 本地存档，后续继续扩展导入导出。未选中的候选入口仍保留为临时内存态。
 - `prompts`：目标层，负责 prompt 模板和版本，不散落在组件里。
 
-第一版技术栈定为 React + TypeScript + Vite + Fastify + Zod。SQLite 是目标存储方案，当前实现状态以 `docs/technical-plan.md` 和代码为准。
+第一版技术栈定为 React + TypeScript + Vite + Fastify + Zod。SQLite 是当前本地存档方案，当前实现状态以 `docs/technical-plan.md` 和代码为准。
 
 MVP 不做独立 GM Agent。GM 职责先拆成 `gm-guard`、`input-intent`、`narration`、`suggested-moves`、`game-log` 等 service，共用同一个 OpenAI-compatible provider。V2 做 Dungeon Mind 时，再升级为更独立的规则代理。
 

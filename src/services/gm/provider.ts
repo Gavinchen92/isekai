@@ -10,6 +10,7 @@ import type {
   Session,
   SuggestedMove
 } from "../../domain";
+import type { LogContext } from "../../shared/logger";
 import { mockGmProvider } from "./mock-provider";
 import { openAiGmProvider } from "./openai-provider";
 
@@ -27,13 +28,25 @@ export type GmTurnInput = {
   session: Session;
   userMessage: GmUserMessage;
   journeyMemory: readonly JourneyMemoryEntry[];
+  logContext?: LogContext;
   messageHistory: readonly Message[];
   previousInternalStatePatches: readonly GmInternalStatePatch[];
   previousSuggestedMoves: readonly SuggestedMove[];
 };
 
+export type GmTurnStreamEvent =
+  | {
+      type: "narration_chunk";
+      chunk: string;
+    }
+  | {
+      type: "completed";
+      result: GmTurnResult;
+    };
+
 export type GmProvider = {
   generateTurn(input: GmTurnInput): Promise<GmTurnResult>;
+  streamTurn?(input: GmTurnInput): AsyncGenerator<GmTurnStreamEvent>;
 };
 
 export function getGmProvider(): GmProvider {

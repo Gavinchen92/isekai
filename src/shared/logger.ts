@@ -19,17 +19,39 @@ export type AppLogConfig = {
 };
 
 export type LogFields = Record<string, unknown>;
+export type LogContext = {
+  operation?: string;
+  requestId?: string;
+  sessionId?: string;
+  worldSeedId?: string;
+};
+
+type ZodIssueLike = {
+  code?: unknown;
+  message?: unknown;
+  path?: unknown;
+  values?: unknown;
+};
+
+type AiStructuredOutputParseFailureInput = LogContext & {
+  content: string;
+  error: unknown;
+  parsedJson?: unknown;
+  schemaName: string;
+};
 
 export const appLogConfig = resolveLogConfig();
 export const appLogger = createAppLogger(appLogConfig);
 
 export function resolveLogConfig(env: NodeJS.ProcessEnv = process.env): AppLogConfig {
   const isTest = env.NODE_ENV === "test" || Boolean(env.VITEST);
+  const isProduction = env.NODE_ENV === "production";
+  const defaultLogLlmPayloads = !isTest && !isProduction;
 
   return {
     filePath: env.LOG_FILE ?? "data/logs/api.jsonl",
     level: parseLogLevel(env.LOG_LEVEL, isTest ? "silent" : "info"),
-    logLlmPayloads: parseBooleanEnv(env.LOG_LLM_PAYLOADS, false),
+    logLlmPayloads: parseBooleanEnv(env.LOG_LLM_PAYLOADS, defaultLogLlmPayloads),
     payloadMaxChars: parsePositiveInteger(env.LOG_PAYLOAD_MAX_CHARS, 1_200),
     toFile: parseBooleanEnv(env.LOG_TO_FILE, !isTest)
   };
@@ -61,6 +83,58 @@ export function truncateForLog(value: string, maxChars = appLogConfig.payloadMax
   }
 
   return `${value.slice(0, maxChars)}...[truncated ${value.length - maxChars} chars]`;
+}
+
+export function buildAiStructuredOutputParseFailureFields(
+  input: AiStructuredOutputParseFailureInput,
+  config: AppLogConfig = appLogConfig
+): LogFields {
+  const zodIssues = extractZodIssues(input.error);
+  const firstIssuePath = zodIssues[0]?.path ?? [];
+  const fields: LogFields = {
+    err: input.error,
+    operation: input.operation,
+    requestId: input.requestId,
+    responseChars: input.content.length,
+    schemaName: input.schemaName,
+    sessionId: input.sessionId,
+    worldSeedId: input.worldSeedId,
+    zodIssues: zodIssues.map((issue) => ({
+      code: issue.code,
+      message: issue.message,
+      path: formatIssuePath(issue.path),
+      values: issue.values
+    }))
+  };
+
+  const failedPath = formatIssuePath(firstIssuePath);
+
+  if (failedPath) {
+    fields.failedPath = failedPath;
+  }
+
+  if (config.logLlmPayloads) {
+    fields.responsePreview = truncateForLog(input.content, config.payloadMaxChars);
+
+    if (input.parsedJson !== undefined && firstIssuePath.length > 0) {
+      fields.invalidValuePreview = truncateForLog(
+        stringifyForLog(readValueAtPath(input.parsedJson, firstIssuePath)),
+        config.payloadMaxChars
+      );
+    }
+  }
+
+  return fields;
+}
+
+export function logAiStructuredOutputParseFailure(
+  input: AiStructuredOutputParseFailureInput
+): void {
+  logEvent(
+    "ai_structured_output_parse_failed",
+    buildAiStructuredOutputParseFailureFields(input),
+    "error"
+  );
 }
 
 function createAppLogger(config: AppLogConfig): Logger {
@@ -144,4 +218,68 @@ function parsePositiveInteger(value: string | undefined, fallback: number): numb
   const parsedValue = Number(value);
 
   return Number.isInteger(parsedValue) && parsedValue > 0 ? parsedValue : fallback;
+}
+
+function extractZodIssues(error: unknown): readonly {
+  code?: string;
+  message: string;
+  path: readonly PropertyKey[];
+  values?: unknown;
+}[] {
+  if (!error || typeof error !== "object" || !("issues" in error)) {
+    return [];
+  }
+
+  const issues = (error as { issues?: unknown }).issues;
+
+  if (!Array.isArray(issues)) {
+    return [];
+  }
+
+  return issues.map((issue: ZodIssueLike) => ({
+    code: typeof issue.code === "string" ? issue.code : undefined,
+    message: typeof issue.message === "string" ? issue.message : String(issue.message),
+    path: Array.isArray(issue.path)
+      ? issue.path.filter((segment): segment is PropertyKey => isPropertyKey(segment))
+      : [],
+    values: issue.values
+  }));
+}
+
+function isPropertyKey(value: unknown): value is PropertyKey {
+  return ["number", "string", "symbol"].includes(typeof value);
+}
+
+function formatIssuePath(path: readonly PropertyKey[]): string {
+  return path
+    .map((segment) =>
+      typeof segment === "symbol" ? segment.description ?? "symbol" : String(segment)
+    )
+    .join(".");
+}
+
+function readValueAtPath(root: unknown, path: readonly PropertyKey[]): unknown {
+  return path.reduce<unknown>((current, segment) => {
+    if (current === null || current === undefined || typeof segment === "symbol") {
+      return undefined;
+    }
+
+    if (typeof current !== "object" && typeof current !== "function") {
+      return undefined;
+    }
+
+    return (current as Record<PropertyKey, unknown>)[segment];
+  }, root);
+}
+
+function stringifyForLog(value: unknown): string {
+  if (value === undefined) {
+    return "undefined";
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }

@@ -155,6 +155,212 @@ afterEach(() => {
 });
 
 describe("App", () => {
+  it("does not show continue adventure when no local session exists", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const requestUrl =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (requestUrl === "/api/world-seeds") {
+        return Promise.resolve(
+          new Response(JSON.stringify(worldSeeds), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          })
+        );
+      }
+
+      if (requestUrl === "/api/sessions/latest") {
+        return Promise.resolve(new Response(JSON.stringify({ error: "Session not found" }), { status: 404 }));
+      }
+
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: "开始新冒险" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "继续冒险" })).not.toBeInTheDocument();
+  });
+
+  it("resumes the latest adventure and can submit another turn", async () => {
+    const adventure = {
+      ...candidates[0],
+      id: "adventure-1",
+      sourceCandidateId: candidates[0]?.id,
+      worldSeedId: "isekai",
+      currentAct: "act1",
+      selectedPlayerSetupId: "wanderer",
+      createdAt: "2026-04-27T00:00:00.000Z",
+      updatedAt: "2026-04-27T00:00:00.000Z"
+    };
+    const session = {
+      id: "session-1",
+      adventureId: "adventure-1",
+      mode: "chat",
+      dmEnabled: false,
+      currentAct: "act1",
+      createdAt: "2026-04-27T00:00:00.000Z",
+      updatedAt: "2026-04-27T00:00:02.000Z"
+    };
+    const journeyMemoryEntries = [
+      {
+        id: "session-1-identity-wanderer",
+        sessionId: "session-1",
+        type: "identity",
+        title: "我的身份",
+        summary: "外来者",
+        details: ["你刚抵达此地。"],
+        visibility: "known",
+        relatedNpcIds: [],
+        relatedLocationIds: [],
+        sourceMessageIds: [],
+        updatedAt: "2026-04-27T00:00:00.000Z"
+      }
+    ];
+    const encoder = new TextEncoder();
+    let turnStreamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const requestUrl =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (requestUrl === "/api/world-seeds") {
+        return Promise.resolve(
+          new Response(JSON.stringify(worldSeeds), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          })
+        );
+      }
+
+      if (requestUrl === "/api/sessions/latest") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              adventure,
+              messages: [
+                {
+                  id: "message-user-1",
+                  sessionId: "session-1",
+                  role: "user",
+                  inputKind: "free",
+                  inferredIntent: "character_action",
+                  content: "我尝试调查高塔入口",
+                  createdAt: "2026-04-27T00:00:01.000Z"
+                },
+                {
+                  id: "message-gm-1",
+                  sessionId: "session-1",
+                  role: "assistant",
+                  content: "你在断星高塔入口发现一处被刻意掩盖的痕迹。",
+                  createdAt: "2026-04-27T00:00:02.000Z"
+                }
+              ],
+              session,
+              suggestedMoves: [
+                {
+                  id: "move-1",
+                  sessionId: "session-1",
+                  sourceMessageId: "message-gm-1",
+                  label: "继续检查痕迹",
+                  intent: "玩家尝试确认痕迹通向哪里",
+                  riskLevel: "medium",
+                  tags: ["调查"],
+                  createdAt: "2026-04-27T00:00:02.000Z"
+                }
+              ]
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" }
+            }
+          )
+        );
+      }
+
+      if (requestUrl === "/api/sessions/session-1/journey-memory") {
+        return Promise.resolve(
+          new Response(JSON.stringify(journeyMemoryEntries), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          })
+        );
+      }
+
+      if (requestUrl === "/api/turns/stream") {
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            turnStreamController = controller;
+          }
+        });
+
+        return Promise.resolve(
+          new Response(stream, {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" }
+          })
+        );
+      }
+
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+
+    render(<App />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "继续冒险" }));
+
+    expect(screen.getByRole("heading", { name: "断塔召唤" })).toBeInTheDocument();
+    expect(screen.getByText("银色符文在脚下熄灭。")).toBeInTheDocument();
+    expect(screen.getByText("你在断星高塔入口发现一处被刻意掩盖的痕迹。")).toBeInTheDocument();
+    expect(screen.queryByText("我尝试调查高塔入口")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "继续检查痕迹" }));
+
+    if (!turnStreamController) {
+      throw new Error("turn stream controller is missing");
+    }
+
+    turnStreamController.enqueue(
+      encoder.encode(
+        [
+          "event: turn_started",
+          'data: {"type":"turn_started","userMessage":{"id":"message-user-2","sessionId":"session-1","role":"user","inputKind":"suggested-move","inferredIntent":"character_action","content":"玩家尝试确认痕迹通向哪里","createdAt":"2026-04-27T00:00:03.000Z"}}',
+          "",
+          "event: narration_chunk",
+          'data: {"type":"narration_chunk","assistantMessageId":"message-gm-2","chunk":"痕迹一路延伸到高塔内侧，"}',
+          "",
+          ""
+        ].join("\n")
+      )
+    );
+
+    expect(await screen.findByText("痕迹一路延伸到高塔内侧，")).toBeInTheDocument();
+    expect(screen.queryByLabelText("故事生成中")).not.toBeInTheDocument();
+
+    turnStreamController.enqueue(
+      encoder.encode(
+        [
+          "event: narration_chunk",
+          'data: {"type":"narration_chunk","assistantMessageId":"message-gm-2","chunk":"石缝里残留着银色粉末。"}',
+          "",
+          "event: suggested_moves_ready",
+          'data: {"type":"suggested_moves_ready","suggestedMoves":[{"id":"move-2","sessionId":"session-1","sourceMessageId":"message-gm-2","label":"尝试收集银色粉末","intent":"玩家尝试收集少量粉末用于辨认","riskLevel":"medium","tags":["调查"],"createdAt":"2026-04-27T00:00:04.000Z"}]}',
+          "",
+          "event: turn_completed",
+          'data: {"type":"turn_completed","turn":{"messages":[{"id":"message-user-2","sessionId":"session-1","role":"user","inputKind":"suggested-move","inferredIntent":"character_action","content":"玩家尝试确认痕迹通向哪里","createdAt":"2026-04-27T00:00:03.000Z"},{"id":"message-gm-2","sessionId":"session-1","role":"assistant","content":"痕迹一路延伸到高塔内侧，石缝里残留着银色粉末。","createdAt":"2026-04-27T00:00:04.000Z"}],"suggestedMoves":[{"id":"move-2","sessionId":"session-1","sourceMessageId":"message-gm-2","label":"尝试收集银色粉末","intent":"玩家尝试收集少量粉末用于辨认","riskLevel":"medium","tags":["调查"],"createdAt":"2026-04-27T00:00:04.000Z"}]}}',
+          "",
+          ""
+        ].join("\n")
+      )
+    );
+    turnStreamController.close();
+
+    expect(
+      await screen.findByText("痕迹一路延伸到高塔内侧，石缝里残留着银色粉末。")
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "尝试收集银色粉末" })).toBeInTheDocument();
+  });
+
   it("aborts candidate generation when the modal closes", async () => {
     let candidateSignal: AbortSignal | undefined;
 

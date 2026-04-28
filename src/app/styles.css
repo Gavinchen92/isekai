@@ -123,6 +123,12 @@ h1 {
   margin-top: 32px;
 }
 
+.resume-hint {
+  color: #6f5b4a;
+  font-size: 14px;
+  margin-top: 12px;
+}
+
 .modal-backdrop {
   align-items: center;
   background: rgba(34, 27, 21, 0.44);

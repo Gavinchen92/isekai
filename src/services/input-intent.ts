@@ -6,15 +6,24 @@ import {
   type MessageInputKind,
   type PlayerInputIntent
 } from "../domain";
-import { requestOpenAiCompatibleJsonObject, resolveOpenAiCompatibleProviderConfig } from "./gm/openai-compatible";
+import type { LogContext } from "../shared/logger";
+import {
+  requestOpenAiCompatibleJsonObject,
+  resolveOpenAiCompatibleProviderConfig
+} from "./gm/openai-compatible";
 
 export type ClassifyPlayerInputRequest = {
   content: string;
   inputKind: MessageInputKind;
 };
 
+type ClassifyPlayerInputOptions = {
+  logContext?: LogContext;
+};
+
 export async function classifyPlayerInput(
-  rawRequest: ClassifyPlayerInputRequest
+  rawRequest: ClassifyPlayerInputRequest,
+  options: ClassifyPlayerInputOptions = {}
 ): Promise<InputIntentClassification> {
   const request = {
     content: rawRequest.content.trim(),
@@ -33,7 +42,7 @@ export async function classifyPlayerInput(
       return classifyPlayerInputWithRules(request);
     case "openai":
     case "openai-compatible":
-      return classifyPlayerInputWithOpenAiCompatible(request);
+      return classifyPlayerInputWithOpenAiCompatible(request, options);
     default:
       throw new Error(`Unsupported input intent provider: ${providerName}`);
   }
@@ -63,12 +72,14 @@ export function classifyPlayerInputWithRules(
 }
 
 export async function classifyPlayerInputWithOpenAiCompatible(
-  request: ClassifyPlayerInputRequest
+  request: ClassifyPlayerInputRequest,
+  options: ClassifyPlayerInputOptions = {}
 ): Promise<InputIntentClassification> {
   const config = resolveOpenAiCompatibleProviderConfig();
   const content = await requestOpenAiCompatibleJsonObject({
     config,
     label: "OpenAI-compatible input intent",
+    logContext: options.logContext,
     messages: [
       {
         role: "system",

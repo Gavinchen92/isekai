@@ -5,11 +5,14 @@ import {
   type AdventureCandidate,
   type CreateAdventureRequest
 } from "../domain";
+import type { LogContext } from "../shared/logger";
+import { loadAdventure, saveAdventure } from "../storage/persistence";
 import { getStoredAdventureCandidate, materializeAdventureCandidate } from "./adventure-candidates";
 
 const adventures = new Map<string, Adventure>();
 
 type CreateAdventureOptions = {
+  logContext?: LogContext;
   signal?: AbortSignal;
 };
 
@@ -74,12 +77,25 @@ export function createAdventureFromCandidate(request: {
   });
 
   adventures.set(adventure.id, adventure);
+  saveAdventure(adventure);
 
   return adventure;
 }
 
 export function getAdventure(adventureId: string): Adventure | undefined {
-  return adventures.get(adventureId);
+  const cachedAdventure = adventures.get(adventureId);
+
+  if (cachedAdventure) {
+    return cachedAdventure;
+  }
+
+  const persistedAdventure = loadAdventure(adventureId);
+
+  if (persistedAdventure) {
+    adventures.set(persistedAdventure.id, persistedAdventure);
+  }
+
+  return persistedAdventure;
 }
 
 function resolveSelectedPlayerSetupId(

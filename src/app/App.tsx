@@ -7,6 +7,7 @@ import type {
   Message,
   MessageInputKind,
   Session,
+  SessionSnapshot,
   SuggestedMove,
   WorldSeedId,
   WorldSeedPreset
@@ -15,6 +16,7 @@ import {
   createAdventure,
   createSession,
   fetchJourneyMemory,
+  fetchLatestSessionSnapshot,
   fetchWorldSeeds,
   generateAdventureCandidates,
   submitTurnStream
@@ -32,7 +34,19 @@ type StartAdventureState =
 
 type PlayState =
   | { status: "selection" }
-  | { status: "active"; adventure: Adventure; session: Session };
+  | {
+      status: "active";
+      adventure: Adventure;
+      initialMessages: readonly Message[];
+      initialSuggestedMoves: readonly SuggestedMove[];
+      session: Session;
+    };
+
+type LatestSessionState =
+  | { status: "loading" }
+  | { status: "empty" }
+  | { status: "success"; snapshot: SessionSnapshot }
+  | { status: "error"; message: string };
 
 type NewAdventureModalState =
   | { status: "closed" }
@@ -93,6 +107,9 @@ export function App() {
   const [playState, setPlayState] = useState<PlayState>({
     status: "selection"
   });
+  const [latestSessionState, setLatestSessionState] = useState<LatestSessionState>({
+    status: "loading"
+  });
   const modalRequestIdRef = useRef(0);
   const modalAbortControllerRef = useRef<AbortController | undefined>(undefined);
 
@@ -125,6 +142,20 @@ export function App() {
     };
   }, []);
 
+  useEffect(() => {
+    let isActive = true;
+
+    void refreshLatestSession((nextState) => {
+      if (isActive) {
+        setLatestSessionState(nextState);
+      }
+    });
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
   function handleBeginNewAdventure() {
     abortModalRequest();
     modalRequestIdRef.current += 1;
@@ -142,6 +173,27 @@ export function App() {
     modalRequestIdRef.current += 1;
     setPlayState({ status: "selection" });
     setNewAdventureModalState({ status: "closed" });
+    setLatestSessionState({ status: "loading" });
+    void refreshLatestSession(setLatestSessionState);
+  }
+
+  function handleContinueLatestAdventure() {
+    if (latestSessionState.status !== "success") {
+      return;
+    }
+
+    const { snapshot } = latestSessionState;
+
+    abortModalRequest();
+    modalRequestIdRef.current += 1;
+    setNewAdventureModalState({ status: "closed" });
+    setPlayState({
+      status: "active",
+      adventure: snapshot.adventure,
+      initialMessages: snapshot.messages,
+      initialSuggestedMoves: snapshot.suggestedMoves,
+      session: snapshot.session
+    });
   }
 
   async function handleSelectWorldSeed(seedId: WorldSeedId) {
@@ -220,6 +272,8 @@ export function App() {
       setPlayState({
         status: "active",
         adventure,
+        initialMessages: [],
+        initialSuggestedMoves: [],
         session
       });
       setNewAdventureModalState({ status: "closed" });
@@ -274,6 +328,9 @@ export function App() {
     return (
       <PlayScreen
         adventure={playState.adventure}
+        initialMessages={playState.initialMessages}
+        initialSuggestedMoves={playState.initialSuggestedMoves}
+        key={playState.session.id}
         session={playState.session}
         onReturnHome={handleReturnHome}
       />
@@ -287,10 +344,21 @@ export function App() {
         <h1 id="page-title">Isekai</h1>
         <p className="lede">醒来、选择、承担后果。让一段新的冒险从世界的裂缝里开始。</p>
         <div className="actions" aria-label="冒险入口">
+          {latestSessionState.status === "success" ? (
+            <button type="button" className="secondary" onClick={handleContinueLatestAdventure}>
+              继续冒险
+            </button>
+          ) : null}
           <button type="button" onClick={handleBeginNewAdventure}>
             开始新冒险
           </button>
         </div>
+        {latestSessionState.status === "success" ? (
+          <p className="resume-hint">上次停在「{latestSessionState.snapshot.adventure.title}」</p>
+        ) : null}
+        {latestSessionState.status === "error" ? (
+          <p className="error">读取本地存档失败：{latestSessionState.message}</p>
+        ) : null}
       </section>
 
       {newAdventureModalState.status !== "closed" ? (
@@ -308,6 +376,20 @@ export function App() {
       ) : null}
     </main>
   );
+}
+
+async function refreshLatestSession(
+  setState: (nextState: LatestSessionState) => void
+): Promise<void> {
+  try {
+    const snapshot = await fetchLatestSessionSnapshot();
+
+    setState(snapshot ? { status: "success", snapshot } : { status: "empty" });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "读取本地存档失败";
+
+    setState({ status: "error", message });
+  }
 }
 
 type NewAdventureModalProps = {
@@ -542,15 +624,23 @@ function CandidateSelection({
 
 type PlayScreenProps = {
   adventure: Adventure;
+  initialMessages: readonly Message[];
+  initialSuggestedMoves: readonly SuggestedMove[];
   session: Session;
   onReturnHome: () => void;
 };
 
-function PlayScreen({ adventure, session, onReturnHome }: PlayScreenProps) {
+function PlayScreen({
+  adventure,
+  initialMessages,
+  initialSuggestedMoves,
+  session,
+  onReturnHome
+}: PlayScreenProps) {
   const [draft, setDraft] = useState("");
-  const [messages, setMessages] = useState<readonly Message[]>([]);
+  const [messages, setMessages] = useState<readonly Message[]>(() => initialMessages);
   const [suggestedMoves, setSuggestedMoves] = useState<readonly MoveOption[]>(() =>
-    buildInitialSuggestedMoves(adventure)
+    initialSuggestedMoves.length > 0 ? initialSuggestedMoves : buildInitialSuggestedMoves(adventure)
   );
   const [turnState, setTurnState] = useState<TurnState>({ status: "idle" });
   const [journeyMemoryState, setJourneyMemoryState] = useState<JourneyMemoryState>({
@@ -560,7 +650,12 @@ function PlayScreen({ adventure, session, onReturnHome }: PlayScreenProps) {
   const [activeJourneyMemoryType, setActiveJourneyMemoryType] =
     useState<JourneyMemoryEntryType>("identity");
   const [hasNewJourneyMemory, setHasNewJourneyMemory] = useState(false);
+  const [streamingAssistantMessageId, setStreamingAssistantMessageId] = useState<string>();
   const stageTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const currentTurnMessageIdsRef = useRef<{
+    assistantId?: string;
+    userId?: string;
+  }>({});
   const isSubmitting = turnState.status === "running";
   const canSendDraft = draft.trim().length > 0 && !isSubmitting;
   const journeyMemoryEntries =
@@ -631,6 +726,8 @@ function PlayScreen({ adventure, session, onReturnHome }: PlayScreenProps) {
     }
 
     clearTurnStageTimers(stageTimersRef);
+    currentTurnMessageIdsRef.current = {};
+    setStreamingAssistantMessageId(undefined);
     setTurnState({ status: "running", stage: "classifying" });
     stageTimersRef.current.push(
       setTimeout(() => {
@@ -650,11 +747,19 @@ function PlayScreen({ adventure, session, onReturnHome }: PlayScreenProps) {
     try {
       await submitTurnStream(session.id, trimmedContent, inputKind, (event) => {
         if (event.type === "turn_started") {
+          currentTurnMessageIdsRef.current = {
+            userId: event.userMessage.id
+          };
           setMessages((currentMessages) => [...currentMessages, event.userMessage]);
           return;
         }
 
         if (event.type === "narration_chunk") {
+          currentTurnMessageIdsRef.current = {
+            ...currentTurnMessageIdsRef.current,
+            assistantId: event.assistantMessageId
+          };
+          setStreamingAssistantMessageId(event.assistantMessageId);
           setMessages((currentMessages) => {
             const existingAssistantIndex = currentMessages.findIndex(
               (message) => message.id === event.assistantMessageId
@@ -687,6 +792,28 @@ function PlayScreen({ adventure, session, onReturnHome }: PlayScreenProps) {
 
         if (event.type === "suggested_moves_ready") {
           setSuggestedMoves(event.suggestedMoves);
+          return;
+        }
+
+        if (event.type === "turn_completed") {
+          const completedMessagesById = new Map(
+            event.turn.messages.map((message) => [message.id, message] as const)
+          );
+
+          setMessages((currentMessages) => {
+            const replacedMessages = currentMessages.map(
+              (message) => completedMessagesById.get(message.id) ?? message
+            );
+            const existingMessageIds = new Set(replacedMessages.map((message) => message.id));
+            const missingCompletedMessages = event.turn.messages.filter(
+              (message) => !existingMessageIds.has(message.id)
+            );
+
+            return [...replacedMessages, ...missingCompletedMessages];
+          });
+          setSuggestedMoves(event.turn.suggestedMoves);
+          setStreamingAssistantMessageId(undefined);
+          currentTurnMessageIdsRef.current = {};
         }
       });
 
@@ -696,6 +823,16 @@ function PlayScreen({ adventure, session, onReturnHome }: PlayScreenProps) {
       void refreshJourneyMemory(true);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "提交回合失败";
+      const { assistantId, userId } = currentTurnMessageIdsRef.current;
+
+      if (assistantId || userId) {
+        setMessages((currentMessages) =>
+          currentMessages.filter((item) => item.id !== assistantId && item.id !== userId)
+        );
+      }
+
+      currentTurnMessageIdsRef.current = {};
+      setStreamingAssistantMessageId(undefined);
       clearTurnStageTimers(stageTimersRef);
       setTurnState({ status: "error", message });
     }
@@ -721,12 +858,16 @@ function PlayScreen({ adventure, session, onReturnHome }: PlayScreenProps) {
             </article>
 
             {storyMessages.map((message) => (
-              <article className="story-card" key={message.id}>
+              <article
+                aria-live={message.id === streamingAssistantMessageId ? "polite" : undefined}
+                className="story-card"
+                key={message.id}
+              >
                 <p>{message.content}</p>
               </article>
             ))}
 
-            {turnState.status === "running" ? (
+            {turnState.status === "running" && !streamingAssistantMessageId ? (
               <article
                 aria-label="故事生成中"
                 aria-live="polite"

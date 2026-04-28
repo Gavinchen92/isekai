@@ -7,6 +7,10 @@ import {
   type JourneyMemoryEntryType,
   type Message
 } from "../domain";
+import {
+  loadJourneyMemoryEntriesForSession,
+  saveJourneyMemoryEntriesForSession
+} from "../storage/persistence";
 
 const journeyMemoryBySession = new Map<string, JourneyMemoryEntry[]>();
 
@@ -68,12 +72,25 @@ export function initializeJourneyMemory(sessionId: string, adventure: Adventure)
 
   const entries = drafts.map((draft) => createEntryFromDraft(sessionId, draft, now));
   journeyMemoryBySession.set(sessionId, entries);
+  saveJourneyMemoryEntriesForSession(sessionId, entries);
 
   return JourneyMemoryEntryListSchema.parse(entries);
 }
 
 export function listJourneyMemory(sessionId: string): readonly JourneyMemoryEntry[] {
-  return JourneyMemoryEntryListSchema.parse(journeyMemoryBySession.get(sessionId) ?? []);
+  const cachedEntries = journeyMemoryBySession.get(sessionId);
+
+  if (cachedEntries) {
+    return JourneyMemoryEntryListSchema.parse(cachedEntries);
+  }
+
+  const persistedEntries = loadJourneyMemoryEntriesForSession(sessionId);
+
+  if (persistedEntries.length > 0) {
+    journeyMemoryBySession.set(sessionId, [...persistedEntries]);
+  }
+
+  return JourneyMemoryEntryListSchema.parse(persistedEntries);
 }
 
 export function extractJourneyMemoryFromTurn(
@@ -103,6 +120,7 @@ export function extractJourneyMemoryFromTurn(
   );
 
   journeyMemoryBySession.set(sessionId, nextEntries);
+  saveJourneyMemoryEntriesForSession(sessionId, nextEntries);
 
   return JourneyMemoryEntryListSchema.parse(nextEntries);
 }

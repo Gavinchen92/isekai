@@ -1,6 +1,12 @@
 import { z } from "zod";
 import type { GmPromptMessage } from "../../domain";
-import { appLogConfig, createLogTimer, logEvent, truncateForLog } from "../../shared/logger";
+import {
+  appLogConfig,
+  createLogTimer,
+  logEvent,
+  truncateForLog,
+  type LogContext
+} from "../../shared/logger";
 
 const OpenAiCompatibleProviderConfigSchema = z.object({
   apiKey: z.string().min(1),
@@ -22,6 +28,22 @@ const OpenAiCompatibleChatCompletionResponseSchema = z.object({
       })
     )
     .min(1)
+});
+
+const OpenAiCompatibleChatCompletionStreamChunkSchema = z.object({
+  choices: z
+    .array(
+      z.object({
+        delta: z
+          .object({
+            content: z.string().nullable().optional()
+          })
+          .passthrough()
+          .default({}),
+        finish_reason: z.string().nullable().optional()
+      })
+    )
+    .default([])
 });
 
 export type OpenAiCompatibleProviderConfigInput = z.input<
@@ -67,6 +89,7 @@ export function resolveOpenAiCompatibleProviderConfig(
 export async function requestOpenAiCompatibleJsonObject(input: {
   config: OpenAiCompatibleProviderConfig;
   label: string;
+  logContext?: LogContext;
   messages: readonly GmPromptMessage[];
   signal?: AbortSignal;
   temperature?: number;
@@ -104,6 +127,7 @@ export async function requestOpenAiCompatibleJsonObject(input: {
   logEvent("llm_request_started", {
     baseUrl: input.config.baseUrl,
     label: input.label,
+    ...input.logContext,
     model: input.config.model,
     provider: "openai-compatible",
     temperature,
@@ -136,6 +160,7 @@ export async function requestOpenAiCompatibleJsonObject(input: {
         durationMs: getDurationMs(),
         err: error,
         label: input.label,
+        ...input.logContext,
         model: input.config.model,
         provider: "openai-compatible"
       },
@@ -152,6 +177,7 @@ export async function requestOpenAiCompatibleJsonObject(input: {
       {
         durationMs: getDurationMs(),
         label: input.label,
+        ...input.logContext,
         model: input.config.model,
         provider: "openai-compatible",
         statusCode: response.status
@@ -171,6 +197,7 @@ export async function requestOpenAiCompatibleJsonObject(input: {
       {
         durationMs: getDurationMs(),
         label: input.label,
+        ...input.logContext,
         model: input.config.model,
         provider: "openai-compatible"
       },
@@ -182,6 +209,7 @@ export async function requestOpenAiCompatibleJsonObject(input: {
   logEvent("llm_request_completed", {
     durationMs: getDurationMs(),
     label: input.label,
+    ...input.logContext,
     model: input.config.model,
     provider: "openai-compatible",
     responseChars: content.length,
@@ -194,12 +222,176 @@ export async function requestOpenAiCompatibleJsonObject(input: {
 export async function* requestOpenAiCompatibleJsonObjectStream(input: {
   config: OpenAiCompatibleProviderConfig;
   label: string;
+  logContext?: LogContext;
   messages: readonly GmPromptMessage[];
   signal?: AbortSignal;
-}): AsyncGenerator<string> {
-  // 过渡阶段：如果 provider 尚未启用原生流式，这里退化为单块输出。
-  // 上层仍可按阶段事件向前端推送，后续可替换为真实 token 流式解析。
-  yield await requestOpenAiCompatibleJsonObject(input);
+  temperature?: number;
+  thinking?: OpenAiCompatibleThinkingMode;
+}): AsyncGenerator<string, string> {
+  const getDurationMs = createLogTimer();
+  const url = buildChatCompletionsUrl(input.config.baseUrl);
+  const temperature = input.temperature ?? input.config.temperature;
+  const payload: {
+    messages: readonly GmPromptMessage[];
+    model: string;
+    response_format: { type: "json_object" };
+    stream: true;
+    temperature: number;
+    thinking?: { type: OpenAiCompatibleThinkingMode };
+  } = {
+    messages: input.messages,
+    model: input.config.model,
+    response_format: {
+      type: "json_object"
+    },
+    stream: true,
+    temperature
+  };
+
+  if (input.thinking) {
+    payload.thinking = {
+      type: input.thinking
+    };
+  }
+
+  const payloadFields = appLogConfig.logLlmPayloads
+    ? {
+        promptPreview: truncateForLog(JSON.stringify(input.messages))
+      }
+    : {};
+
+  logEvent("llm_request_started", {
+    baseUrl: input.config.baseUrl,
+    label: input.label,
+    ...input.logContext,
+    model: input.config.model,
+    provider: "openai-compatible",
+    stream: true,
+    temperature,
+    thinking: input.thinking,
+    timeoutMs: input.config.timeoutMs,
+    ...payloadFields
+  });
+
+  let cleanup: () => void = () => undefined;
+  let content = "";
+
+  try {
+    const result = await fetchResponseWithTimeout(url, {
+      body: JSON.stringify(payload),
+      headers: {
+        authorization: `Bearer ${input.config.apiKey}`,
+        "content-type": "application/json"
+      },
+      method: "POST",
+      signal: input.signal,
+      timeoutMs: input.config.timeoutMs
+    });
+    cleanup = result.cleanup;
+
+    if (!result.response.ok) {
+      const errorBody = trimErrorBody(await result.response.text());
+
+      logEvent(
+        "llm_request_failed",
+        {
+          durationMs: getDurationMs(),
+          label: input.label,
+          ...input.logContext,
+          model: input.config.model,
+          provider: "openai-compatible",
+          statusCode: result.response.status
+        },
+        "error"
+      );
+
+      throw new Error(`${input.label} request failed with ${result.response.status}: ${errorBody}`);
+    }
+
+    if (!result.response.body) {
+      throw new Error(`${input.label} streaming response body is empty`);
+    }
+
+    const reader = result.response.body.getReader();
+    const decoder = new TextDecoder();
+    let bufferedText = "";
+
+    const flushBufferedFrames = function* (flushRemainder = false): Generator<{
+      done: boolean;
+      delta: string;
+    }> {
+      const separator = "\n\n";
+      let separatorIndex = bufferedText.indexOf(separator);
+
+      while (separatorIndex !== -1) {
+        const frame = bufferedText.slice(0, separatorIndex).trim();
+        bufferedText = bufferedText.slice(separatorIndex + separator.length);
+
+        if (frame.length > 0) {
+          yield* extractChatCompletionStreamDeltas(frame);
+        }
+
+        separatorIndex = bufferedText.indexOf(separator);
+      }
+
+      if (flushRemainder) {
+        const remainder = bufferedText.trim();
+        bufferedText = "";
+
+        if (remainder.length > 0) {
+          yield* extractChatCompletionStreamDeltas(remainder);
+        }
+      }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      bufferedText += decoder.decode(value, { stream: true }).replace(/\r\n/gu, "\n");
+
+      for (const event of flushBufferedFrames(false)) {
+        if (event.done) {
+          return completeStream(input, getDurationMs, content);
+        }
+
+        content += event.delta;
+        yield event.delta;
+      }
+    }
+
+    bufferedText += decoder.decode().replace(/\r\n/gu, "\n");
+
+    for (const event of flushBufferedFrames(true)) {
+      if (event.done) {
+        return completeStream(input, getDurationMs, content);
+      }
+
+      content += event.delta;
+      yield event.delta;
+    }
+
+    return completeStream(input, getDurationMs, content);
+  } catch (error: unknown) {
+    logEvent(
+      "llm_request_failed",
+      {
+        durationMs: getDurationMs(),
+        err: error,
+        label: input.label,
+        ...input.logContext,
+        model: input.config.model,
+        provider: "openai-compatible"
+      },
+      "error"
+    );
+    throw error;
+  } finally {
+    cleanup();
+  }
 }
 
 function buildChatCompletionsUrl(baseUrl: string): string {
@@ -242,6 +434,126 @@ async function fetchTextWithTimeout(
     clearTimeout(timeout);
     init.signal?.removeEventListener("abort", abortFromParent);
   }
+}
+
+async function fetchResponseWithTimeout(
+  url: string,
+  init: RequestInit & {
+    signal?: AbortSignal;
+    timeoutMs: number;
+  }
+): Promise<{ cleanup: () => void; response: Response }> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort(new DOMException("OpenAI-compatible request timed out", "AbortError"));
+  }, init.timeoutMs);
+  const abortFromParent = () => {
+    controller.abort(init.signal?.reason);
+  };
+  const cleanup = () => {
+    clearTimeout(timeout);
+    init.signal?.removeEventListener("abort", abortFromParent);
+  };
+
+  if (init.signal?.aborted) {
+    controller.abort(init.signal.reason);
+  } else {
+    init.signal?.addEventListener("abort", abortFromParent, {
+      once: true
+    });
+  }
+
+  try {
+    const { signal: _signal, timeoutMs: _timeoutMs, ...fetchInit } = init;
+    const response = await fetch(url, {
+      ...fetchInit,
+      signal: controller.signal
+    });
+
+    return {
+      cleanup,
+      response
+    };
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+}
+
+function* extractChatCompletionStreamDeltas(frame: string): Generator<{
+  done: boolean;
+  delta: string;
+}> {
+  const payload = frame
+    .split("\n")
+    .map((line) => line.replace(/\r$/u, ""))
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice("data:".length).trim())
+    .join("\n")
+    .trim();
+
+  if (!payload) {
+    return;
+  }
+
+  if (payload === "[DONE]") {
+    yield {
+      done: true,
+      delta: ""
+    };
+    return;
+  }
+
+  const chunk = OpenAiCompatibleChatCompletionStreamChunkSchema.parse(JSON.parse(payload));
+
+  for (const choice of chunk.choices) {
+    const delta = choice.delta.content;
+
+    if (delta) {
+      yield {
+        done: false,
+        delta
+      };
+    }
+  }
+}
+
+function completeStream(
+  input: {
+    config: OpenAiCompatibleProviderConfig;
+    label: string;
+    logContext?: LogContext;
+  },
+  getDurationMs: () => number,
+  content: string
+): string {
+  if (!content) {
+    logEvent(
+      "llm_response_missing_content",
+      {
+        durationMs: getDurationMs(),
+        label: input.label,
+        ...input.logContext,
+        model: input.config.model,
+        provider: "openai-compatible"
+      },
+      "error"
+    );
+    throw new Error(`${input.label} response did not include message content`);
+  }
+
+  logEvent("llm_request_completed", {
+    durationMs: getDurationMs(),
+    label: input.label,
+    ...input.logContext,
+    model: input.config.model,
+    provider: "openai-compatible",
+    responseChars: content.length,
+    stream: true,
+    ...(appLogConfig.logLlmPayloads ? { responsePreview: truncateForLog(content) } : {})
+  });
+
+  return content;
 }
 
 function trimErrorBody(body: string): string {

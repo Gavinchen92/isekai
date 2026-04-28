@@ -24,6 +24,21 @@ export const mockGmProvider: GmProvider = {
         ]
       }
     });
+  },
+  async *streamTurn(input: GmTurnInput) {
+    const result = await mockGmProvider.generateTurn(input);
+
+    for (const chunk of splitMockNarrationChunks(result.narration)) {
+      yield {
+        type: "narration_chunk" as const,
+        chunk
+      };
+    }
+
+    yield {
+      type: "completed" as const,
+      result
+    };
   }
 };
 
@@ -145,6 +160,18 @@ function buildJourneyMemoryCandidates(
       relatedLocationIds: [firstLocation.id]
     }
   ];
+}
+
+function splitMockNarrationChunks(narration: string): string[] {
+  const chars = Array.from(narration);
+  const chunkSize = 12;
+  const chunks: string[] = [];
+
+  for (let index = 0; index < chars.length; index += chunkSize) {
+    chunks.push(chars.slice(index, index + chunkSize).join(""));
+  }
+
+  return chunks;
 }
 
 function isConfirmedClueText(text: string): boolean {

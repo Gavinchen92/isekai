@@ -43,7 +43,7 @@ MVP 的标准是能从一个世界种子生成冒险，并稳定玩下去：
 - 生成偏好：故事风格、危险程度、奇幻浓度、玩家身份倾向，可全部用默认值。
 - AI 冒险生成：一次生成 1-3 个候选冒险，用户选择一个开始。
 - 冒险包保存：生成结果落库，后续运行时不重复随机改世界观。
-- 本地存储：当前先用内存 repository 跑通闭环；目标是 SQLite + Node 后端，方便后续做导入导出和桌面封装。
+- 本地存储：SQLite + Node 后端保存已开始的冒险、会话、消息、推荐行动、旅途见闻和 GM 内部状态；未选中的候选入口仍是临时内存态。
 - 模型接入：OpenAI-compatible endpoint，支持 `baseURL`、`apiKey`、`model`。
 - Chat runtime：当前优先保证消息列表、自由输入框、AI 推荐后续动作、继续和局外提醒。regenerate、rewind、branch、save message 是后续运行时能力，不作为当前已实现能力。
 - Prompt preview：仅作为开发调试能力，不出现在默认玩家界面。
@@ -614,7 +614,7 @@ VN 模式先做手动素材，不做自动生成：
 后端：
 
 - Node.js 本地服务。
-- 当前阶段先用内存 repository。SQLite 接入后，用来存储世界种子、冒险包、会话、冒险日志、任务状态和百科。
+- SQLite 用来存储已开始的冒险包、会话、消息、推荐行动、旅途见闻和 GM 内部状态。
 - OpenAI-compatible provider 抽象，后续接 Ollama/LM Studio。
 
 存储：
@@ -639,9 +639,8 @@ VN 模式先做手动素材，不做自动生成：
 
 ## 17. 下一步
 
-1. 补 SQLite repository，把当前内存数据迁到持久化层。
-2. 完善冒险候选的真实 AI 生成质量和错误恢复。
-3. 补齐最小 Chat runtime 的真实回合推进体验。
-4. 继续打磨旅途见闻，保证它只展示玩家已知信息。
-5. 再做内部日志、prompt preview、导出和分支管理。
-6. 最后进入 Lorebook、Dungeon Mind、VN 模式和高级编辑器。
+1. 完善冒险候选的真实 AI 生成质量和错误恢复。
+2. 补齐最小 Chat runtime 的阶段推进和结局落库体验。
+3. 继续打磨旅途见闻，保证它只展示玩家已知信息。
+4. 再做内部日志、prompt preview、导出和分支管理。
+5. 最后进入 Lorebook、Dungeon Mind、VN 模式和高级编辑器。

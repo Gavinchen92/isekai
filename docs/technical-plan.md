@@ -1,17 +1,17 @@
 # 技术方案
 
 日期：2026-04-27  
-结论：第一版采用 `React + TypeScript + Vite + Fastify + Zod` 做一个前后端一体的本地 Web 应用。当前代码先用内存 repository 跑通闭环，SQLite 是目标存储方案，还没有落到真实数据库层。
+结论：第一版采用 `React + TypeScript + Vite + Fastify + Zod` 做一个前后端一体的本地 Web 应用。当前代码用 SQLite 保存已开始的冒险、会话、消息、推荐行动、旅途见闻和 GM 内部状态；未选中的候选入口仍是临时内存态。
 
 ## 1. 方案选择
 
-我们不采用 Next.js / Remix 作为第一版基础框架。这个项目不需要 SSR、SEO、服务端组件或复杂路由数据加载，核心是本地 API、LLM 调用、存档和高交互 UI。SQLite 会作为后续持久化层接入，当前阶段先保持内存实现，避免在玩法闭环还不稳定时过早迁移。
+我们不采用 Next.js / Remix 作为第一版基础框架。这个项目不需要 SSR、SEO、服务端组件或复杂路由数据加载，核心是本地 API、LLM 调用、存档和高交互 UI。SQLite 作为本地持久化层，默认文件为 `data/isekai.sqlite`，可用 `ISEKAI_DB_PATH` 覆盖。
 
 推荐方案：
 
 - 前端：React + TypeScript + Vite。
 - 后端：Fastify 本地 API server。
-- 存储：当前为内存 repository，目标为 SQLite。
+- 存储：SQLite，本地文件存档。
 - Schema：Zod。
 - AI provider：OpenAI-compatible。
 - 包管理器：pnpm。
@@ -38,7 +38,7 @@ Vite React 前端
   ↓ HTTP / streaming
 Fastify 本地 API
   ├─ in-memory repositories（当前）
-  ├─ SQLite（目标）
+  ├─ SQLite
   ├─ prompts
   ├─ OpenAI-compatible provider
   └─ 文件系统 data/
@@ -55,11 +55,11 @@ src/
   domain/       # Adventure、Session、StoryArc、Log、Rule 等纯业务模型
   services/     # 生成冒险、推进剧情、生成建议动作、更新日志
   services/gm/  # 当前 GM provider、context builder、mock/openai provider
-  storage/      # 目标目录：SQLite repositories、迁移、导入导出
+  storage/      # SQLite repositories、迁移、导入导出
   prompts/      # 目标目录：prompt 模板和版本
   server/       # Fastify server、routes、middlewares
   shared/       # 前后端共享 schema/type
-data/          # 目标目录，SQLite 和本地素材接入后再创建
+data/
   isekai.sqlite
   assets/
 ```
@@ -150,10 +150,14 @@ GET  /api/health
 GET  /api/world-seeds
 POST /api/adventure-candidates
 POST /api/adventures
+GET  /api/adventures/:id
 POST /api/sessions
+GET  /api/sessions/latest
+GET  /api/sessions/:id
 GET  /api/sessions/:id/journey-memory
 POST /api/sessions/:id/journey-memory/extract
 POST /api/turns
+POST /api/turns/stream
 ```
 
 `POST /api/adventure-candidates` 只生成并返回 `AdventureCandidatePreview[]`，用于玩家选择冒险入口；真实 provider 下会按候选数量并发生成单个 preview concept，服务端保存内部 concept。`POST /api/adventures` 只接收 `candidateId`、`worldSeedId` 和可选 `selectedPlayerSetupId`，服务端在这里把被选中的 concept 补全为完整 `AdventureCandidate` 并创建 Adventure。前端不能回传完整候选，避免把主线、结局、胜败条件或隐藏 GM notes 暴露给玩家端。
@@ -162,9 +166,7 @@ POST /api/turns
 
 ```txt
 GET  /api/adventures
-GET  /api/adventures/:id
 
-GET  /api/sessions/:id
 POST /api/sessions/:id/messages
 POST /api/sessions/:id/continue
 POST /api/sessions/:id/regenerate
@@ -181,7 +183,7 @@ GET  /api/settings/provider
 PUT  /api/settings/provider
 ```
 
-需要流式输出的接口可以用 Server-Sent Events 或 fetch streaming。第一版优先保证能跑通，流式体验可以作为紧随其后的增强。
+`POST /api/turns/stream` 使用 Server-Sent Events 返回回合阶段事件；如果未来 provider 支持原生 token streaming，可以在保持事件契约不变的前提下增强。
 
 ## 7. 数据和 schema 原则
 
