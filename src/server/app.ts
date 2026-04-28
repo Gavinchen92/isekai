@@ -9,8 +9,12 @@ import {
 import { generateAdventureCandidatePreviews } from "../services/adventure-candidates";
 import { createAdventure, getAdventure } from "../services/adventures";
 import { listJourneyMemory } from "../services/journey-memory";
-import { getLatestSessionSnapshot, getSessionSnapshot } from "../services/session-snapshots";
-import { createSession, getSession } from "../services/sessions";
+import {
+  getLatestSessionSnapshot,
+  getSessionSnapshot,
+  listSessionSnapshots
+} from "../services/session-snapshots";
+import { createSession, deleteSession, getSession } from "../services/sessions";
 import { createTurn, createTurnStream, refreshJourneyMemoryForSession } from "../services/turns";
 import { listWorldSeedPresets } from "../services/world-seeds";
 import { createHealthResponse } from "../shared/health";
@@ -195,6 +199,7 @@ export function createServer() {
       throw error;
     }
   });
+  server.get("/api/sessions", async () => listSessionSnapshots());
   server.get("/api/sessions/latest", async (_request, reply) => {
     const snapshot = getLatestSessionSnapshot();
 
@@ -205,6 +210,22 @@ export function createServer() {
     }
 
     return snapshot;
+  });
+  server.delete("/api/sessions/:sessionId", async (request, reply) => {
+    const { sessionId } = request.params as { sessionId: string };
+
+    try {
+      deleteSession(sessionId);
+      return reply.status(204).send();
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message.includes("session not found")) {
+        return reply.status(404).send({
+          error: "Session not found"
+        });
+      }
+
+      throw error;
+    }
   });
   server.get("/api/sessions/:sessionId", async (request, reply) => {
     const { sessionId } = request.params as { sessionId: string };

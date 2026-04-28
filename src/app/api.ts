@@ -2,6 +2,7 @@ import {
   AdventureSchema,
   AdventureCandidatePreviewListSchema,
   JourneyMemoryEntryListSchema,
+  SessionSnapshotListSchema,
   SessionSnapshotSchema,
   SessionSchema,
   TurnStreamEventSchema,
@@ -122,6 +123,16 @@ export async function fetchLatestSessionSnapshot(): Promise<SessionSnapshot | un
   return SessionSnapshotSchema.parse(await response.json());
 }
 
+export async function fetchSessionSnapshots(): Promise<readonly SessionSnapshot[]> {
+  const response = await fetch("/api/sessions");
+
+  if (!response.ok) {
+    throwApiRequestError("fetch sessions", response.status);
+  }
+
+  return SessionSnapshotListSchema.parse(await response.json());
+}
+
 export async function fetchSessionSnapshot(sessionId: string): Promise<SessionSnapshot> {
   const response = await fetch(`/api/sessions/${sessionId}`);
 
@@ -130,6 +141,16 @@ export async function fetchSessionSnapshot(sessionId: string): Promise<SessionSn
   }
 
   return SessionSnapshotSchema.parse(await response.json());
+}
+
+export async function deleteSession(sessionId: string): Promise<void> {
+  const response = await fetch(`/api/sessions/${sessionId}`, {
+    method: "DELETE"
+  });
+
+  if (!response.ok) {
+    throwApiRequestError(`delete session ${sessionId}`, response.status);
+  }
 }
 
 export async function fetchJourneyMemory(sessionId: string): Promise<readonly JourneyMemoryEntry[]> {

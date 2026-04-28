@@ -98,6 +98,10 @@ export function getAdventure(adventureId: string): Adventure | undefined {
   return persistedAdventure;
 }
 
+export function forgetAdventure(adventureId: string): void {
+  adventures.delete(adventureId);
+}
+
 function resolveSelectedPlayerSetupId(
   candidate: PlayerSetupOwner,
   selectedPlayerSetupId?: string

@@ -152,8 +152,10 @@ POST /api/adventure-candidates
 POST /api/adventures
 GET  /api/adventures/:id
 POST /api/sessions
+GET  /api/sessions
 GET  /api/sessions/latest
 GET  /api/sessions/:id
+DELETE /api/sessions/:id
 GET  /api/sessions/:id/journey-memory
 POST /api/sessions/:id/journey-memory/extract
 POST /api/turns
@@ -165,8 +167,6 @@ POST /api/turns/stream
 计划项：
 
 ```txt
-GET  /api/adventures
-
 POST /api/sessions/:id/messages
 POST /api/sessions/:id/continue
 POST /api/sessions/:id/regenerate

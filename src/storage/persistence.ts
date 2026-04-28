@@ -90,6 +90,20 @@ export function loadSession(sessionId: string): Session | undefined {
   return parsePayloadRow(SessionSchema, selectPayloadById("sessions", sessionId));
 }
 
+export function loadSessions(): readonly Session[] {
+  const rows = getDatabase()
+    .prepare(
+      `
+        SELECT payload
+        FROM sessions
+        ORDER BY updated_at DESC, created_at DESC, id DESC
+      `
+    )
+    .all();
+
+  return rows.map((row) => parsePayload(SessionSchema, PayloadRowSchema.parse(row).payload));
+}
+
 export function loadLatestSession(): Session | undefined {
   const row = getDatabase()
     .prepare(
@@ -103,6 +117,44 @@ export function loadLatestSession(): Session | undefined {
     .get();
 
   return parsePayloadRow(SessionSchema, row);
+}
+
+export function deleteSession(sessionId: string): { session: Session; deletedAdventureId?: string } | undefined {
+  const session = loadSession(sessionId);
+
+  if (!session) {
+    return undefined;
+  }
+
+  const database = getDatabase();
+
+  database.exec("BEGIN");
+
+  try {
+    database.prepare("DELETE FROM gm_internal_state_patches WHERE session_id = ?").run(sessionId);
+    database.prepare("DELETE FROM journey_memory_entries WHERE session_id = ?").run(sessionId);
+    database.prepare("DELETE FROM suggested_moves WHERE session_id = ?").run(sessionId);
+    database.prepare("DELETE FROM messages WHERE session_id = ?").run(sessionId);
+    database.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
+
+    const hasRemainingSession = Boolean(
+      database
+        .prepare("SELECT 1 FROM sessions WHERE adventure_id = ? LIMIT 1")
+        .get(session.adventureId)
+    );
+    const deletedAdventureId = hasRemainingSession ? undefined : session.adventureId;
+
+    if (deletedAdventureId) {
+      database.prepare("DELETE FROM adventures WHERE id = ?").run(deletedAdventureId);
+    }
+
+    database.exec("COMMIT");
+
+    return deletedAdventureId ? { session, deletedAdventureId } : { session };
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 export function saveMessagesForSession(

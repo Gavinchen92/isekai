@@ -16,8 +16,9 @@ import {
   ApiRequestError,
   createAdventure,
   createSession,
+  deleteSession,
   fetchJourneyMemory,
-  fetchLatestSessionSnapshot,
+  fetchSessionSnapshots,
   fetchWorldSeeds,
   generateAdventureCandidates,
   submitTurnStream
@@ -43,11 +44,15 @@ type PlayState =
       session: Session;
     };
 
-type LatestSessionState =
+type SavedSessionsState =
   | { status: "loading" }
-  | { status: "empty" }
-  | { status: "success"; snapshot: SessionSnapshot }
+  | { status: "success"; snapshots: readonly SessionSnapshot[] }
   | { status: "error"; message: string };
+
+type DeleteSavedSessionState =
+  | { status: "idle" }
+  | { status: "loading"; sessionId: string }
+  | { status: "error"; sessionId?: string; message: string };
 
 type NewAdventureModalState =
   | { status: "closed" }
@@ -98,6 +103,15 @@ const journeyMemoryTypeLabels: Record<JourneyMemoryEntryType, string> = {
   item: "物件"
 };
 
+const storyActLabels: Record<Session["currentAct"], string> = {
+  act1: "第一幕",
+  act2: "第二幕",
+  act3: "第三幕",
+  act4: "第四幕",
+  ending: "终章",
+  epilogue: "尾声"
+};
+
 type UserErrorCopy = {
   fallback: string;
   upstream?: string;
@@ -113,9 +127,11 @@ export function App() {
   const [playState, setPlayState] = useState<PlayState>({
     status: "selection"
   });
-  const [latestSessionState, setLatestSessionState] = useState<LatestSessionState>({
+  const [savedSessionsState, setSavedSessionsState] = useState<SavedSessionsState>({
     status: "loading"
   });
+  const [deleteSavedSessionState, setDeleteSavedSessionState] =
+    useState<DeleteSavedSessionState>({ status: "idle" });
   const modalRequestIdRef = useRef(0);
   const modalAbortControllerRef = useRef<AbortController | undefined>(undefined);
 
@@ -153,9 +169,9 @@ export function App() {
   useEffect(() => {
     let isActive = true;
 
-    void refreshLatestSession((nextState) => {
+    void refreshSavedSessions((nextState) => {
       if (isActive) {
-        setLatestSessionState(nextState);
+        setSavedSessionsState(nextState);
       }
     });
 
@@ -181,17 +197,12 @@ export function App() {
     modalRequestIdRef.current += 1;
     setPlayState({ status: "selection" });
     setNewAdventureModalState({ status: "closed" });
-    setLatestSessionState({ status: "loading" });
-    void refreshLatestSession(setLatestSessionState);
+    setDeleteSavedSessionState({ status: "idle" });
+    setSavedSessionsState({ status: "loading" });
+    void refreshSavedSessions(setSavedSessionsState);
   }
 
-  function handleContinueLatestAdventure() {
-    if (latestSessionState.status !== "success") {
-      return;
-    }
-
-    const { snapshot } = latestSessionState;
-
+  function handleContinueSavedSession(snapshot: SessionSnapshot) {
     abortModalRequest();
     modalRequestIdRef.current += 1;
     setNewAdventureModalState({ status: "closed" });
@@ -202,6 +213,38 @@ export function App() {
       initialSuggestedMoves: snapshot.suggestedMoves,
       session: snapshot.session
     });
+  }
+
+  async function handleDeleteSavedSession(snapshot: SessionSnapshot) {
+    if (!confirmDeleteSavedSession(snapshot.adventure.title)) {
+      return;
+    }
+
+    setDeleteSavedSessionState({ status: "loading", sessionId: snapshot.session.id });
+
+    try {
+      await deleteSession(snapshot.session.id);
+      setSavedSessionsState((current) =>
+        current.status === "success"
+          ? {
+              status: "success",
+              snapshots: current.snapshots.filter(
+                (item) => item.session.id !== snapshot.session.id
+              )
+            }
+          : current
+      );
+      setDeleteSavedSessionState({ status: "idle" });
+    } catch (error: unknown) {
+      const message = getUserFacingErrorMessage(error, {
+        fallback: "删除存档失败，请稍后重试。"
+      });
+      setDeleteSavedSessionState({
+        status: "error",
+        sessionId: snapshot.session.id,
+        message
+      });
+    }
   }
 
   async function handleSelectWorldSeed(seedId: WorldSeedId) {
@@ -358,22 +401,18 @@ export function App() {
         <h1 id="page-title">Isekai</h1>
         <p className="lede">醒来、选择、承担后果。让一段新的冒险从世界的裂缝里开始。</p>
         <div className="actions" aria-label="冒险入口">
-          {latestSessionState.status === "success" ? (
-            <button type="button" className="secondary" onClick={handleContinueLatestAdventure}>
-              继续冒险
-            </button>
-          ) : null}
           <button type="button" onClick={handleBeginNewAdventure}>
             开始新冒险
           </button>
         </div>
-        {latestSessionState.status === "success" ? (
-          <p className="resume-hint">上次停在「{latestSessionState.snapshot.adventure.title}」</p>
-        ) : null}
-        {latestSessionState.status === "error" ? (
-          <p className="error">读取本地存档失败：{latestSessionState.message}</p>
-        ) : null}
       </section>
+
+      <SavedSessionsPanel
+        deleteState={deleteSavedSessionState}
+        savedSessionsState={savedSessionsState}
+        onDelete={(snapshot) => void handleDeleteSavedSession(snapshot)}
+        onContinue={handleContinueSavedSession}
+      />
 
       {newAdventureModalState.status !== "closed" ? (
         <NewAdventureModal
@@ -392,13 +431,13 @@ export function App() {
   );
 }
 
-async function refreshLatestSession(
-  setState: (nextState: LatestSessionState) => void
+async function refreshSavedSessions(
+  setState: (nextState: SavedSessionsState) => void
 ): Promise<void> {
   try {
-    const snapshot = await fetchLatestSessionSnapshot();
+    const snapshots = await fetchSessionSnapshots();
 
-    setState(snapshot ? { status: "success", snapshot } : { status: "empty" });
+    setState({ status: "success", snapshots });
   } catch (error: unknown) {
     const message = getUserFacingErrorMessage(error, {
       fallback: "读取本地存档失败，请稍后重试。"
@@ -406,6 +445,90 @@ async function refreshLatestSession(
 
     setState({ status: "error", message });
   }
+}
+
+type SavedSessionsPanelProps = {
+  savedSessionsState: SavedSessionsState;
+  deleteState: DeleteSavedSessionState;
+  onContinue: (snapshot: SessionSnapshot) => void;
+  onDelete: (snapshot: SessionSnapshot) => void;
+};
+
+function SavedSessionsPanel({
+  deleteState,
+  onContinue,
+  onDelete,
+  savedSessionsState
+}: SavedSessionsPanelProps) {
+  if (savedSessionsState.status === "loading") {
+    return null;
+  }
+
+  if (savedSessionsState.status === "error") {
+    return (
+      <section className="save-panel" aria-labelledby="saved-sessions-title">
+        <h2 id="saved-sessions-title">冒险存档</h2>
+        <p className="error">读取本地存档失败：{savedSessionsState.message}</p>
+      </section>
+    );
+  }
+
+  if (savedSessionsState.snapshots.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="save-panel" aria-labelledby="saved-sessions-title">
+      <div className="save-panel-heading">
+        <div>
+          <p className="eyebrow">继续游玩</p>
+          <h2 id="saved-sessions-title">冒险存档</h2>
+        </div>
+        <span>{savedSessionsState.snapshots.length} 个记录</span>
+      </div>
+
+      {deleteState.status === "error" ? <p className="error">{deleteState.message}</p> : null}
+
+      <div className="save-list">
+        {savedSessionsState.snapshots.map((snapshot) => {
+          const isDeleting =
+            deleteState.status === "loading" && deleteState.sessionId === snapshot.session.id;
+
+          return (
+            <article className="save-card" key={snapshot.session.id}>
+              <div>
+                <h3>{snapshot.adventure.title}</h3>
+                <p>{snapshot.adventure.pitch}</p>
+                <div className="save-meta" aria-label={`${snapshot.adventure.title} 存档信息`}>
+                  <span>最近更新 {formatSavedSessionTime(snapshot.session.updatedAt)}</span>
+                  <span>{getAssistantMessageCount(snapshot)} 段剧情</span>
+                  <span>{storyActLabels[snapshot.session.currentAct]}</span>
+                </div>
+              </div>
+              <div className="save-actions">
+                <button
+                  type="button"
+                  className="secondary compact"
+                  disabled={deleteState.status === "loading"}
+                  onClick={() => onDelete(snapshot)}
+                >
+                  {isDeleting ? "删除中..." : "删除"}
+                </button>
+                <button
+                  type="button"
+                  className="compact"
+                  disabled={deleteState.status === "loading"}
+                  onClick={() => onContinue(snapshot)}
+                >
+                  继续
+                </button>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 
 type NewAdventureModalProps = {
@@ -1040,6 +1163,27 @@ function isLikelyUpstreamFailure(error: unknown): boolean {
   }
 
   return false;
+}
+
+function confirmDeleteSavedSession(adventureTitle: string): boolean {
+  if (typeof window === "undefined" || typeof window.confirm !== "function") {
+    return false;
+  }
+
+  return window.confirm(`确定删除「${adventureTitle}」的冒险存档吗？此操作不可恢复。`);
+}
+
+function getAssistantMessageCount(snapshot: SessionSnapshot): number {
+  return snapshot.messages.filter((message) => message.role === "assistant").length;
+}
+
+function formatSavedSessionTime(value: string): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date(value));
 }
 
 type JourneyMemorySummaryProps = {

@@ -284,6 +284,107 @@ describe("POST /api/sessions", () => {
   });
 });
 
+describe("GET /api/sessions", () => {
+  it("returns an empty list when no session exists", async () => {
+    const server = createServer();
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/sessions"
+    });
+
+    await server.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([]);
+  });
+
+  it("returns all resumable session snapshots", async () => {
+    const server = createServer();
+    const { adventure } = await createAdventureFromGeneratedCandidate(server, "isekai");
+    const firstSessionResponse = await server.inject({
+      method: "POST",
+      url: "/api/sessions",
+      payload: {
+        adventureId: adventure.id
+      }
+    });
+    const secondSessionResponse = await server.inject({
+      method: "POST",
+      url: "/api/sessions",
+      payload: {
+        adventureId: adventure.id
+      }
+    });
+    const firstSession = SessionSchema.parse(firstSessionResponse.json());
+    const secondSession = SessionSchema.parse(secondSessionResponse.json());
+    const listResponse = await server.inject({
+      method: "GET",
+      url: "/api/sessions"
+    });
+
+    await server.close();
+
+    expect(listResponse.statusCode).toBe(200);
+    expect(listResponse.json()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          adventure: expect.objectContaining({ id: adventure.id }),
+          session: expect.objectContaining({ id: firstSession.id })
+        }),
+        expect.objectContaining({
+          adventure: expect.objectContaining({ id: adventure.id }),
+          session: expect.objectContaining({ id: secondSession.id })
+        })
+      ])
+    );
+  });
+});
+
+describe("DELETE /api/sessions/:id", () => {
+  it("deletes a saved session", async () => {
+    const server = createServer();
+    const { adventure } = await createAdventureFromGeneratedCandidate(server, "medieval");
+    const sessionResponse = await server.inject({
+      method: "POST",
+      url: "/api/sessions",
+      payload: {
+        adventureId: adventure.id
+      }
+    });
+    const session = SessionSchema.parse(sessionResponse.json());
+    const deleteResponse = await server.inject({
+      method: "DELETE",
+      url: `/api/sessions/${session.id}`
+    });
+    const snapshotResponse = await server.inject({
+      method: "GET",
+      url: `/api/sessions/${session.id}`
+    });
+    const listResponse = await server.inject({
+      method: "GET",
+      url: "/api/sessions"
+    });
+
+    await server.close();
+
+    expect(deleteResponse.statusCode).toBe(204);
+    expect(snapshotResponse.statusCode).toBe(404);
+    expect(listResponse.json()).toEqual([]);
+  });
+
+  it("returns not found for unknown sessions", async () => {
+    const server = createServer();
+    const response = await server.inject({
+      method: "DELETE",
+      url: "/api/sessions/missing"
+    });
+
+    await server.close();
+
+    expect(response.statusCode).toBe(404);
+  });
+});
+
 describe("GET /api/sessions/latest", () => {
   it("returns not found when no session exists", async () => {
     const server = createServer();

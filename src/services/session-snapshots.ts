@@ -1,6 +1,6 @@
 import { SessionSnapshotSchema, type SessionSnapshot } from "../domain";
 import { getAdventure } from "./adventures";
-import { getLatestSession, getSession } from "./sessions";
+import { getLatestSession, getSession, listSessions } from "./sessions";
 import { listMessages, listSuggestedMoves } from "./turns";
 
 export function getSessionSnapshot(sessionId: string): SessionSnapshot | undefined {
@@ -32,4 +32,16 @@ export function getLatestSessionSnapshot(): SessionSnapshot | undefined {
   }
 
   return getSessionSnapshot(session.id);
+}
+
+export function listSessionSnapshots(): readonly SessionSnapshot[] {
+  return listSessions().map((session) => {
+    const snapshot = getSessionSnapshot(session.id);
+
+    if (!snapshot) {
+      throw new Error(`session not found: ${session.id}`);
+    }
+
+    return snapshot;
+  });
 }

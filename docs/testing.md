@@ -64,4 +64,4 @@ pnpm build
 - `src/services/gm/*.test.ts`：context builder、mock provider、OpenAI-compatible provider 测试。
 - `src/server/app.test.ts`：Fastify API route 测试。
 - `src/app/App.test.tsx`：新冒险入口、候选选择、游玩页和旅途见闻 UI 测试。
-- `tests/e2e/new-adventure.spec.ts`：真实浏览器下的新冒险、回合提交、旅途见闻和继续冒险 smoke 测试。
+- `tests/e2e/new-adventure.spec.ts`：真实浏览器下的新冒险、回合提交、旅途见闻和存档继续 smoke 测试。

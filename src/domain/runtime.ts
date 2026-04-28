@@ -104,6 +104,8 @@ export const SessionSnapshotSchema = z.object({
   suggestedMoves: z.array(SuggestedMoveSchema)
 });
 
+export const SessionSnapshotListSchema = z.array(SessionSnapshotSchema);
+
 export const TurnStreamStartedEventSchema = z.object({
   type: z.literal("turn_started"),
   userMessage: MessageSchema

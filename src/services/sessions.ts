@@ -4,8 +4,14 @@ import {
   type CreateSessionRequest,
   type Session
 } from "../domain";
-import { loadLatestSession, loadSession, saveSession } from "../storage/persistence";
-import { getAdventure } from "./adventures";
+import {
+  deleteSession as deletePersistedSession,
+  loadLatestSession,
+  loadSession,
+  loadSessions,
+  saveSession
+} from "../storage/persistence";
+import { forgetAdventure, getAdventure } from "./adventures";
 import { initializeJourneyMemory } from "./journey-memory";
 
 const sessions = new Map<string, Session>();
@@ -64,6 +70,32 @@ export function getLatestSession(): Session | undefined {
   }
 
   return persistedSession;
+}
+
+export function listSessions(): readonly Session[] {
+  const persistedSessions = loadSessions();
+
+  persistedSessions.forEach((session) => {
+    sessions.set(session.id, session);
+  });
+
+  return persistedSessions;
+}
+
+export function deleteSession(sessionId: string): Session {
+  const deleteResult = deletePersistedSession(sessionId);
+
+  if (!deleteResult) {
+    throw new Error(`session not found: ${sessionId}`);
+  }
+
+  sessions.delete(sessionId);
+
+  if (deleteResult.deletedAdventureId) {
+    forgetAdventure(deleteResult.deletedAdventureId);
+  }
+
+  return deleteResult.session;
 }
 
 export function updateSessionAfterTurn(

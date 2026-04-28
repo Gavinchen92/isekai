@@ -6,7 +6,7 @@ test("玩家可以创建、游玩并继续一段 mock 冒险", async ({ page }) 
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "Isekai" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "继续冒险" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "冒险存档" })).toHaveCount(0);
 
   await page.getByRole("button", { name: "开始新冒险" }).click();
 
@@ -64,9 +64,12 @@ test("玩家可以创建、游玩并继续一段 mock 冒险", async ({ page }) 
   await page.getByRole("button", { name: "返回首页" }).click();
 
   await expect(page.getByRole("heading", { name: "Isekai" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "继续冒险" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "冒险存档" })).toBeVisible();
 
-  await page.getByRole("button", { name: "继续冒险" }).click();
+  const savedAdventure = page.locator(".save-card").filter({
+    hasText: "断塔召唤"
+  });
+  await savedAdventure.getByRole("button", { name: "继续" }).click();
 
   await expect(page.getByRole("heading", { name: "断塔召唤" })).toBeVisible();
   await expect(page.getByText(/你开始行动。断星高塔/u)).toBeVisible();

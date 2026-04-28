@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
@@ -155,7 +155,7 @@ afterEach(() => {
 });
 
 describe("App", () => {
-  it("does not show continue adventure when no local session exists", async () => {
+  it("does not show saved sessions when no local session exists", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const requestUrl =
         typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
@@ -169,9 +169,12 @@ describe("App", () => {
         );
       }
 
-      if (requestUrl === "/api/sessions/latest") {
+      if (requestUrl === "/api/sessions") {
         return Promise.resolve(
-          new Response(JSON.stringify({ error: "Session not found" }), { status: 404 })
+          new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          })
         );
       }
 
@@ -181,10 +184,10 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByRole("button", { name: "开始新冒险" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "继续冒险" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "冒险存档" })).not.toBeInTheDocument();
   });
 
-  it("resumes the latest adventure and can submit another turn", async () => {
+  it("shows saved sessions and can resume a selected adventure", async () => {
     const adventure = {
       ...candidates[0],
       id: "adventure-1",
@@ -203,6 +206,21 @@ describe("App", () => {
       currentAct: "act1",
       createdAt: "2026-04-27T00:00:00.000Z",
       updatedAt: "2026-04-27T00:00:02.000Z"
+    };
+    const newerAdventure = {
+      ...adventure,
+      id: "adventure-2",
+      title: "灰堡密约",
+      pitch: "你在边境古堡里醒来，密约已经被烧去一半。",
+      sourceCandidateId: "medieval-candidate-1",
+      worldSeedId: "medieval",
+      updatedAt: "2026-04-27T00:00:03.000Z"
+    };
+    const newerSession = {
+      ...session,
+      id: "session-2",
+      adventureId: "adventure-2",
+      updatedAt: "2026-04-27T00:00:04.000Z"
     };
     const journeyMemoryEntries = [
       {
@@ -235,43 +253,51 @@ describe("App", () => {
         );
       }
 
-      if (requestUrl === "/api/sessions/latest") {
+      if (requestUrl === "/api/sessions") {
         return Promise.resolve(
           new Response(
-            JSON.stringify({
-              adventure,
-              messages: [
-                {
-                  id: "message-user-1",
-                  sessionId: "session-1",
-                  role: "user",
-                  inputKind: "free",
-                  inferredIntent: "character_action",
-                  content: "我尝试调查高塔入口",
-                  createdAt: "2026-04-27T00:00:01.000Z"
-                },
-                {
-                  id: "message-gm-1",
-                  sessionId: "session-1",
-                  role: "assistant",
-                  content: "你在断星高塔入口发现一处被刻意掩盖的痕迹。",
-                  createdAt: "2026-04-27T00:00:02.000Z"
-                }
-              ],
-              session,
-              suggestedMoves: [
-                {
-                  id: "move-1",
-                  sessionId: "session-1",
-                  sourceMessageId: "message-gm-1",
-                  label: "继续检查痕迹",
-                  intent: "玩家尝试确认痕迹通向哪里",
-                  riskLevel: "medium",
-                  tags: ["调查"],
-                  createdAt: "2026-04-27T00:00:02.000Z"
-                }
-              ]
-            }),
+            JSON.stringify([
+              {
+                adventure: newerAdventure,
+                messages: [],
+                session: newerSession,
+                suggestedMoves: []
+              },
+              {
+                adventure,
+                messages: [
+                  {
+                    id: "message-user-1",
+                    sessionId: "session-1",
+                    role: "user",
+                    inputKind: "free",
+                    inferredIntent: "character_action",
+                    content: "我尝试调查高塔入口",
+                    createdAt: "2026-04-27T00:00:01.000Z"
+                  },
+                  {
+                    id: "message-gm-1",
+                    sessionId: "session-1",
+                    role: "assistant",
+                    content: "你在断星高塔入口发现一处被刻意掩盖的痕迹。",
+                    createdAt: "2026-04-27T00:00:02.000Z"
+                  }
+                ],
+                session,
+                suggestedMoves: [
+                  {
+                    id: "move-1",
+                    sessionId: "session-1",
+                    sourceMessageId: "message-gm-1",
+                    label: "继续检查痕迹",
+                    intent: "玩家尝试确认痕迹通向哪里",
+                    riskLevel: "medium",
+                    tags: ["调查"],
+                    createdAt: "2026-04-27T00:00:02.000Z"
+                  }
+                ]
+              }
+            ]),
             {
               status: 200,
               headers: { "Content-Type": "application/json" }
@@ -309,7 +335,16 @@ describe("App", () => {
 
     render(<App />);
 
-    await userEvent.click(await screen.findByRole("button", { name: "继续冒险" }));
+    expect(await screen.findByText("断塔召唤")).toBeInTheDocument();
+    expect(screen.getByText("灰堡密约")).toBeInTheDocument();
+    expect(screen.getByText("1 段剧情")).toBeInTheDocument();
+
+    const savedCard = screen.getByText("断塔召唤").closest("article");
+    if (!savedCard) {
+      throw new Error("saved session card is missing");
+    }
+
+    await userEvent.click(within(savedCard).getByRole("button", { name: "继续" }));
 
     expect(screen.getByRole("heading", { name: "断塔召唤" })).toBeInTheDocument();
     expect(screen.getByText("银色符文在脚下熄灭。")).toBeInTheDocument();
@@ -361,6 +396,156 @@ describe("App", () => {
       await screen.findByText("痕迹一路延伸到高塔内侧，石缝里残留着银色粉末。")
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "尝试收集银色粉末" })).toBeInTheDocument();
+  });
+
+  it("deletes a saved session after confirmation", async () => {
+    const adventure = {
+      ...candidates[0],
+      id: "adventure-1",
+      sourceCandidateId: candidates[0]?.id,
+      worldSeedId: "isekai",
+      currentAct: "act1",
+      selectedPlayerSetupId: "wanderer",
+      createdAt: "2026-04-27T00:00:00.000Z",
+      updatedAt: "2026-04-27T00:00:00.000Z"
+    };
+    const session = {
+      id: "session-1",
+      adventureId: "adventure-1",
+      mode: "chat",
+      dmEnabled: false,
+      currentAct: "act1",
+      createdAt: "2026-04-27T00:00:00.000Z",
+      updatedAt: "2026-04-27T00:00:02.000Z"
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const requestUrl =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (requestUrl === "/api/world-seeds") {
+        return Promise.resolve(
+          new Response(JSON.stringify(worldSeeds), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          })
+        );
+      }
+
+      if (requestUrl === "/api/sessions") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify([
+              {
+                adventure,
+                messages: [],
+                session,
+                suggestedMoves: []
+              }
+            ]),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" }
+            }
+          )
+        );
+      }
+
+      if (requestUrl === "/api/sessions/session-1" && init?.method === "DELETE") {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<App />);
+
+    const savedCard = (await screen.findByText("断塔召唤")).closest("article");
+    if (!savedCard) {
+      throw new Error("saved session card is missing");
+    }
+
+    await userEvent.click(within(savedCard).getByRole("button", { name: "删除" }));
+
+    expect(window.confirm).toHaveBeenCalledWith(
+      "确定删除「断塔召唤」的冒险存档吗？此操作不可恢复。"
+    );
+    expect(fetchMock).toHaveBeenCalledWith("/api/sessions/session-1", {
+      method: "DELETE"
+    });
+    expect(screen.queryByText("断塔召唤")).not.toBeInTheDocument();
+  });
+
+  it("keeps a saved session when delete confirmation is cancelled", async () => {
+    const adventure = {
+      ...candidates[0],
+      id: "adventure-1",
+      sourceCandidateId: candidates[0]?.id,
+      worldSeedId: "isekai",
+      currentAct: "act1",
+      selectedPlayerSetupId: "wanderer",
+      createdAt: "2026-04-27T00:00:00.000Z",
+      updatedAt: "2026-04-27T00:00:00.000Z"
+    };
+    const session = {
+      id: "session-1",
+      adventureId: "adventure-1",
+      mode: "chat",
+      dmEnabled: false,
+      currentAct: "act1",
+      createdAt: "2026-04-27T00:00:00.000Z",
+      updatedAt: "2026-04-27T00:00:02.000Z"
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const requestUrl =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (requestUrl === "/api/world-seeds") {
+        return Promise.resolve(
+          new Response(JSON.stringify(worldSeeds), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          })
+        );
+      }
+
+      if (requestUrl === "/api/sessions") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify([
+              {
+                adventure,
+                messages: [],
+                session,
+                suggestedMoves: []
+              }
+            ]),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" }
+            }
+          )
+        );
+      }
+
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    render(<App />);
+
+    const savedCard = (await screen.findByText("断塔召唤")).closest("article");
+    if (!savedCard) {
+      throw new Error("saved session card is missing");
+    }
+
+    await userEvent.click(within(savedCard).getByRole("button", { name: "删除" }));
+
+    expect(window.confirm).toHaveBeenCalled();
+    expect(screen.getByText("断塔召唤")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/sessions/session-1", {
+      method: "DELETE"
+    });
   });
 
   it("aborts candidate generation when the modal closes", async () => {
@@ -419,9 +604,12 @@ describe("App", () => {
         );
       }
 
-      if (requestUrl === "/api/sessions/latest") {
+      if (requestUrl === "/api/sessions") {
         return Promise.resolve(
-          new Response(JSON.stringify({ error: "Session not found" }), { status: 404 })
+          new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          })
         );
       }
 
