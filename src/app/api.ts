@@ -3,6 +3,7 @@ import {
   AdventureCandidatePreviewListSchema,
   JourneyMemoryEntryListSchema,
   SessionSchema,
+  TurnStreamEventSchema,
   TurnResponseSchema,
   type Adventure,
   type AdventureCandidatePreview,
@@ -11,6 +12,7 @@ import {
   type MessageInputKind,
   type Session,
   type TurnResponse,
+  type TurnStreamEvent,
   WorldSeedPresetListSchema,
   type WorldSeedId,
   type WorldSeedPreset
@@ -118,4 +120,101 @@ export async function submitTurn(
   }
 
   return TurnResponseSchema.parse(await response.json());
+}
+
+export async function submitTurnStream(
+  sessionId: string,
+  content: string,
+  inputKind: MessageInputKind,
+  onEvent: (event: TurnStreamEvent) => void
+): Promise<void> {
+  const response = await fetch("/api/turns/stream", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ sessionId, content, inputKind })
+  });
+
+  if (!response.ok) {
+    throw new Error(`submit turn stream failed: ${response.status}`);
+  }
+
+  if (!response.body) {
+    throw new Error("submit turn stream failed: response body is empty");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let pendingEventType = "";
+  let bufferedText = "";
+
+  const handleFrame = (frame: string) => {
+    const lines = frame
+      .split("\n")
+      .map((line) => line.replace(/\r$/u, ""));
+    let payload = "";
+
+    for (const line of lines) {
+      if (line.startsWith("event:")) {
+        pendingEventType = line.slice("event:".length).trim();
+      }
+
+      if (line.startsWith("data:")) {
+        payload += `${line.slice("data:".length).trim()}\n`;
+      }
+    }
+
+    if (!payload.trim()) {
+      return;
+    }
+
+    const parsedPayload = JSON.parse(payload.trim()) as { type?: string; message?: string };
+    const eventType = parsedPayload.type ?? pendingEventType;
+
+    if (eventType === "turn_error") {
+      throw new Error(parsedPayload.message ?? "turn stream failed");
+    }
+
+    onEvent(TurnStreamEventSchema.parse(parsedPayload));
+  };
+
+  const flushBufferedFrames = (flushRemainder = false) => {
+    const separator = "\n\n";
+    let separatorIndex = bufferedText.indexOf(separator);
+
+    while (separatorIndex !== -1) {
+      const frame = bufferedText.slice(0, separatorIndex).trim();
+      bufferedText = bufferedText.slice(separatorIndex + separator.length);
+
+      if (frame.length > 0) {
+        handleFrame(frame);
+      }
+
+      separatorIndex = bufferedText.indexOf(separator);
+    }
+
+    if (flushRemainder) {
+      const remainder = bufferedText.trim();
+      bufferedText = "";
+
+      if (remainder.length > 0) {
+        handleFrame(remainder);
+      }
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    bufferedText += decoder.decode(value, { stream: true });
+    flushBufferedFrames(false);
+  }
+
+  bufferedText += decoder.decode();
+  flushBufferedFrames(true);
 }

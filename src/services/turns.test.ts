@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { TurnResponseSchema } from "../domain";
+import { TurnResponseSchema, type TurnStreamEvent } from "../domain";
 import { generateMockAdventureCandidates } from "./adventure-candidates";
 import { createAdventureFromCandidate } from "./adventures";
 import * as journeyMemoryService from "./journey-memory";
 import { createSession } from "./sessions";
 import {
   createTurn,
+  createTurnStream,
   listGmInternalStatePatches,
   listMessages,
   listSuggestedMoves,
@@ -127,5 +128,29 @@ describe("createTurn", () => {
       })
     );
     extractSpy.mockRestore();
+  });
+});
+
+describe("createTurnStream", () => {
+  it("emits staged events and persists final turn state", async () => {
+    const session = createTestSession();
+    const events: TurnStreamEvent[] = [];
+
+    for await (const event of createTurnStream({
+      sessionId: session.id,
+      content: "我尝试调查高塔入口的符文"
+    })) {
+      events.push(event);
+    }
+
+    expect(events.map((event) => event.type)).toEqual([
+      "turn_started",
+      "narration_chunk",
+      "suggested_moves_ready",
+      "turn_completed"
+    ]);
+    expect(listMessages(session.id)).toHaveLength(2);
+    expect(listSuggestedMoves(session.id)).toHaveLength(3);
+    expect(listGmInternalStatePatches(session.id)).toHaveLength(1);
   });
 });

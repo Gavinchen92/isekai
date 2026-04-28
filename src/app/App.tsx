@@ -17,7 +17,7 @@ import {
   fetchJourneyMemory,
   fetchWorldSeeds,
   generateAdventureCandidates,
-  submitTurn
+  submitTurnStream
 } from "./api";
 
 type WorldSeedsState =
@@ -590,9 +590,48 @@ function PlayScreen({ adventure, session, onReturnHome }: PlayScreenProps) {
     );
 
     try {
-      const response = await submitTurn(session.id, trimmedContent, inputKind);
-      setMessages((currentMessages) => [...currentMessages, ...response.messages]);
-      setSuggestedMoves(response.suggestedMoves);
+      await submitTurnStream(session.id, trimmedContent, inputKind, (event) => {
+        if (event.type === "turn_started") {
+          setMessages((currentMessages) => [...currentMessages, event.userMessage]);
+          return;
+        }
+
+        if (event.type === "narration_chunk") {
+          setMessages((currentMessages) => {
+            const existingAssistantIndex = currentMessages.findIndex(
+              (message) => message.id === event.assistantMessageId
+            );
+
+            if (existingAssistantIndex === -1) {
+              return [
+                ...currentMessages,
+                {
+                  id: event.assistantMessageId,
+                  sessionId: session.id,
+                  role: "assistant",
+                  content: event.chunk,
+                  createdAt: new Date().toISOString()
+                }
+              ];
+            }
+
+            return currentMessages.map((message, index) =>
+              index === existingAssistantIndex
+                ? {
+                    ...message,
+                    content: `${message.content}${event.chunk}`
+                  }
+                : message
+            );
+          });
+          return;
+        }
+
+        if (event.type === "suggested_moves_ready") {
+          setSuggestedMoves(event.suggestedMoves);
+        }
+      });
+
       setDraft("");
       clearTurnStageTimers(stageTimersRef);
       setTurnState({ status: "idle" });

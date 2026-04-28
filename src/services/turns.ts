@@ -3,12 +3,15 @@ import {
   MessageSchema,
   SuggestedMoveSchema,
   TurnResponseSchema,
+  TurnStreamEventSchema,
+  type Adventure,
   type GmInternalStatePatch,
+  type GmTurnResult,
   type CreateTurnRequest,
   type Message,
-  type MessageInputKind,
   type SuggestedMove,
-  type TurnResponse
+  type TurnResponse,
+  type TurnStreamEvent
 } from "../domain";
 import { getAdventure } from "./adventures";
 import { getGmProvider, type GmUserMessage } from "./gm/provider";
@@ -40,106 +43,78 @@ function createId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
 }
 
+type PreparedTurnContext = {
+  request: CreateTurnRequest;
+  sessionId: string;
+  adventure: Adventure;
+  parsedUserMessage: Message;
+  userMessage: GmUserMessage;
+  messageHistory: readonly Message[];
+  previousSuggestedMoves: readonly SuggestedMove[];
+  previousInternalStatePatches: readonly GmInternalStatePatch[];
+};
+
+type TurnArtifacts = {
+  assistantMessage: Message;
+  suggestedMoves: SuggestedMove[];
+  response: TurnResponse;
+};
+
 export async function createTurn(
   rawRequest: unknown,
   options: CreateTurnOptions = {}
 ): Promise<TurnResponse> {
-  const request: CreateTurnRequest = CreateTurnRequestSchema.parse(rawRequest);
-  const session = getSession(request.sessionId);
-
-  if (!session) {
-    throw new Error(`session not found: ${request.sessionId}`);
-  }
-
-  const adventure = getAdventure(session.adventureId);
-
-  if (!adventure) {
-    throw new Error(`adventure not found: ${session.adventureId}`);
-  }
-
-  const now = new Date().toISOString();
-  const inputIntent = await classifyPlayerInput({
-    content: request.content,
-    inputKind: request.inputKind
-  });
-  const inferredIntent = inputIntent.intent;
-  const parsedUserMessage = MessageSchema.parse({
-    id: createId("message"),
-    sessionId: session.id,
-    role: "user",
-    inputKind: request.inputKind,
-    inferredIntent,
-    content: request.content,
-    createdAt: now
-  });
-  const userMessage: GmUserMessage = {
-    ...parsedUserMessage,
-    role: "user",
-    inputKind: request.inputKind,
-    inferredIntent,
-    intentConfidence: inputIntent.confidence,
-    isResultClaim: inputIntent.isResultClaim,
-    normalizedAttempt: inputIntent.normalizedAttempt
-  };
-  const messageHistory = messagesBySession.get(session.id) ?? [];
-  const previousSuggestedMoves = suggestedMovesBySession.get(session.id) ?? [];
-  const previousInternalStatePatches = gmInternalStatePatchesBySession.get(session.id) ?? [];
+  const context = await prepareTurnContext(rawRequest);
   const gmResult = await getGmProvider().generateTurn({
-    adventure,
-    session,
-    userMessage,
-    journeyMemory: journeyMemoryService.listJourneyMemory(session.id),
-    messageHistory,
-    previousInternalStatePatches,
-    previousSuggestedMoves
-  });
-  const assistantMessage = MessageSchema.parse({
-    id: createId("message"),
-    sessionId: session.id,
-    role: "assistant",
-    content: gmResult.narration,
-    createdAt: new Date().toISOString()
-  });
-  const messages = [...messageHistory, parsedUserMessage, assistantMessage];
-  const suggestedMoves = buildSuggestedMovesFromGmResult(
-    session.id,
-    assistantMessage.id,
-    gmResult.suggestedMoves
-  );
-
-  messagesBySession.set(session.id, messages);
-  suggestedMovesBySession.set(session.id, suggestedMoves);
-  gmInternalStatePatchesBySession.set(session.id, [
-    ...(gmInternalStatePatchesBySession.get(session.id) ?? []),
-    gmResult.internalStatePatch
-  ]);
-  const journeyMemoryPostProcessStartedAt = performance.now();
-  void enqueueJourneyMemoryPostProcess(session.id, async () => {
-    journeyMemoryService.extractJourneyMemoryFromTurn(session.id, {
-      adventure,
-      assistantMessage,
-      memoryCandidates: gmResult.journeyMemoryCandidates,
-      userMessage
-    });
-  }).then((error) => {
-    if (!error) {
-      options.onJourneyMemoryPostProcessSettled?.({
-        durationMs: Math.round(performance.now() - journeyMemoryPostProcessStartedAt),
-        status: "completed"
-      });
-      return;
-    }
-
-    options.onJourneyMemoryPostProcessSettled?.({
-      durationMs: Math.round(performance.now() - journeyMemoryPostProcessStartedAt),
-      error,
-      status: "failed"
-    });
+    adventure: context.adventure,
+    session: getSessionOrThrow(context.request.sessionId),
+    userMessage: context.userMessage,
+    journeyMemory: journeyMemoryService.listJourneyMemory(context.sessionId),
+    messageHistory: context.messageHistory,
+    previousInternalStatePatches: context.previousInternalStatePatches,
+    previousSuggestedMoves: context.previousSuggestedMoves
   });
 
-  return TurnResponseSchema.parse({
-    messages: [userMessage, assistantMessage],
-    suggestedMoves
+  const artifacts = finalizeTurnFromGmResult(context, gmResult, undefined, options);
+
+  return artifacts.response;
+}
+
+export async function* createTurnStream(rawRequest: unknown): AsyncGenerator<TurnStreamEvent> {
+  const context = await prepareTurnContext(rawRequest);
+  const assistantMessageId = createId("message");
+
+  yield TurnStreamEventSchema.parse({
+    type: "turn_started",
+    userMessage: context.parsedUserMessage
+  });
+
+  const gmResult = await getGmProvider().generateTurn({
+    adventure: context.adventure,
+    session: getSessionOrThrow(context.request.sessionId),
+    userMessage: context.userMessage,
+    journeyMemory: journeyMemoryService.listJourneyMemory(context.sessionId),
+    messageHistory: context.messageHistory,
+    previousInternalStatePatches: context.previousInternalStatePatches,
+    previousSuggestedMoves: context.previousSuggestedMoves
+  });
+
+  yield TurnStreamEventSchema.parse({
+    type: "narration_chunk",
+    assistantMessageId,
+    chunk: gmResult.narration
+  });
+
+  const artifacts = finalizeTurnFromGmResult(context, gmResult, assistantMessageId);
+
+  yield TurnStreamEventSchema.parse({
+    type: "suggested_moves_ready",
+    suggestedMoves: artifacts.suggestedMoves
+  });
+
+  yield TurnStreamEventSchema.parse({
+    type: "turn_completed",
+    turn: artifacts.response
   });
 }
 
@@ -225,6 +200,114 @@ function enqueueJourneyMemoryPostProcess(
   return nextTask;
 }
 
+async function prepareTurnContext(rawRequest: unknown): Promise<PreparedTurnContext> {
+  const request: CreateTurnRequest = CreateTurnRequestSchema.parse(rawRequest);
+  const session = getSessionOrThrow(request.sessionId);
+  const adventure = getAdventure(session.adventureId);
+
+  if (!adventure) {
+    throw new Error(`adventure not found: ${session.adventureId}`);
+  }
+
+  const now = new Date().toISOString();
+  const inputIntent = await classifyPlayerInput({
+    content: request.content,
+    inputKind: request.inputKind
+  });
+  const inferredIntent = inputIntent.intent;
+  const parsedUserMessage = MessageSchema.parse({
+    id: createId("message"),
+    sessionId: session.id,
+    role: "user",
+    inputKind: request.inputKind,
+    inferredIntent,
+    content: request.content,
+    createdAt: now
+  });
+  const userMessage: GmUserMessage = {
+    ...parsedUserMessage,
+    role: "user",
+    inputKind: request.inputKind,
+    inferredIntent,
+    intentConfidence: inputIntent.confidence,
+    isResultClaim: inputIntent.isResultClaim,
+    normalizedAttempt: inputIntent.normalizedAttempt
+  };
+
+  return {
+    request,
+    sessionId: session.id,
+    adventure,
+    parsedUserMessage,
+    userMessage,
+    messageHistory: messagesBySession.get(session.id) ?? [],
+    previousSuggestedMoves: suggestedMovesBySession.get(session.id) ?? [],
+    previousInternalStatePatches: gmInternalStatePatchesBySession.get(session.id) ?? []
+  };
+}
+
+function finalizeTurnFromGmResult(
+  context: PreparedTurnContext,
+  gmResult: GmTurnResult,
+  assistantMessageId = createId("message"),
+  options: CreateTurnOptions = {}
+): TurnArtifacts {
+  const assistantMessage = MessageSchema.parse({
+    id: assistantMessageId,
+    sessionId: context.sessionId,
+    role: "assistant",
+    content: gmResult.narration,
+    createdAt: new Date().toISOString()
+  });
+  const messages = [...context.messageHistory, context.parsedUserMessage, assistantMessage];
+  const suggestedMoves = buildSuggestedMovesFromGmResult(
+    context.sessionId,
+    assistantMessage.id,
+    gmResult.suggestedMoves
+  );
+
+  messagesBySession.set(context.sessionId, messages);
+  suggestedMovesBySession.set(context.sessionId, suggestedMoves);
+  gmInternalStatePatchesBySession.set(context.sessionId, [
+    ...(gmInternalStatePatchesBySession.get(context.sessionId) ?? []),
+    gmResult.internalStatePatch
+  ]);
+  const journeyMemoryPostProcessStartedAt = performance.now();
+  void enqueueJourneyMemoryPostProcess(context.sessionId, async () => {
+    journeyMemoryService.extractJourneyMemoryFromTurn(context.sessionId, {
+      adventure: context.adventure,
+      assistantMessage,
+      memoryCandidates: gmResult.journeyMemoryCandidates,
+      userMessage: context.userMessage
+    });
+  }).then((error) => {
+    if (!error) {
+      options.onJourneyMemoryPostProcessSettled?.({
+        durationMs: Math.round(performance.now() - journeyMemoryPostProcessStartedAt),
+        status: "completed"
+      });
+      return;
+    }
+
+    options.onJourneyMemoryPostProcessSettled?.({
+      durationMs: Math.round(performance.now() - journeyMemoryPostProcessStartedAt),
+      error,
+      status: "failed"
+    });
+  });
+
+  const response = TurnResponseSchema.parse({
+    messages: [context.userMessage, assistantMessage],
+    suggestedMoves
+  });
+
+  return {
+    assistantMessage,
+    suggestedMoves,
+    response
+  };
+}
+
 function buildSuggestedMovesFromGmResult(
   sessionId: string,
   sourceMessageId: string,
@@ -249,4 +332,14 @@ function buildSuggestedMovesFromGmResult(
       createdAt: now
     })
   );
+}
+
+function getSessionOrThrow(sessionId: string) {
+  const session = getSession(sessionId);
+
+  if (!session) {
+    throw new Error(`session not found: ${sessionId}`);
+  }
+
+  return session;
 }

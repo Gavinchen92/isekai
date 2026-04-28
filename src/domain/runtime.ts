@@ -97,6 +97,34 @@ export const TurnResponseSchema = z.object({
   phase: TurnPhaseSchema.optional()
 });
 
+export const TurnStreamStartedEventSchema = z.object({
+  type: z.literal("turn_started"),
+  userMessage: MessageSchema
+});
+
+export const TurnStreamNarrationChunkEventSchema = z.object({
+  type: z.literal("narration_chunk"),
+  assistantMessageId: z.string().min(1),
+  chunk: z.string().min(1)
+});
+
+export const TurnStreamSuggestedMovesReadyEventSchema = z.object({
+  type: z.literal("suggested_moves_ready"),
+  suggestedMoves: z.array(SuggestedMoveSchema).min(1).max(3)
+});
+
+export const TurnStreamCompletedEventSchema = z.object({
+  type: z.literal("turn_completed"),
+  turn: TurnResponseSchema
+});
+
+export const TurnStreamEventSchema = z.discriminatedUnion("type", [
+  TurnStreamStartedEventSchema,
+  TurnStreamNarrationChunkEventSchema,
+  TurnStreamSuggestedMovesReadyEventSchema,
+  TurnStreamCompletedEventSchema
+]);
+
 export type PlayerInputIntent = z.infer<typeof PlayerInputIntentSchema>;
 export type MessageInputKind = z.infer<typeof MessageInputKindSchema>;
 export type InputIntentClassification = z.infer<typeof InputIntentClassificationSchema>;
@@ -107,3 +135,4 @@ export type CreateTurnRequest = z.infer<typeof CreateTurnRequestSchema>;
 export type Message = z.infer<typeof MessageSchema>;
 export type SuggestedMove = z.infer<typeof SuggestedMoveSchema>;
 export type TurnResponse = z.infer<typeof TurnResponseSchema>;
+export type TurnStreamEvent = z.infer<typeof TurnStreamEventSchema>;

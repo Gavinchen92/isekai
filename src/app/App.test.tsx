@@ -200,7 +200,10 @@ describe("App", () => {
     ];
 
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
-      if (input === "/api/world-seeds") {
+      const requestUrl =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (requestUrl === "/api/world-seeds") {
         return Promise.resolve(
           new Response(JSON.stringify(worldSeeds), {
             status: 200,
@@ -209,13 +212,13 @@ describe("App", () => {
         );
       }
 
-      if (input === "/api/adventure-candidates" && init?.method === "POST") {
+      if (requestUrl === "/api/adventure-candidates" && init?.method === "POST") {
         return new Promise<Response>((resolve) => {
           resolveCandidateRequest = resolve;
         });
       }
 
-      if (input === "/api/adventures" && init?.method === "POST") {
+      if (requestUrl === "/api/adventures" && init?.method === "POST") {
         expect(JSON.parse(String(init.body))).toEqual({
           candidateId: "isekai-candidate-1",
           selectedPlayerSetupId: "insider",
@@ -244,7 +247,7 @@ describe("App", () => {
         );
       }
 
-      if (input === "/api/sessions" && init?.method === "POST") {
+      if (requestUrl === "/api/sessions" && init?.method === "POST") {
         return Promise.resolve(
           new Response(
             JSON.stringify({
@@ -264,7 +267,7 @@ describe("App", () => {
         );
       }
 
-      if (input === "/api/sessions/session-1/journey-memory") {
+      if (requestUrl === "/api/sessions/session-1/journey-memory") {
         return Promise.resolve(
           new Response(JSON.stringify(journeyMemoryEntries), {
             status: 200,
@@ -273,7 +276,7 @@ describe("App", () => {
         );
       }
 
-      if (input === "/api/turns" && init?.method === "POST") {
+      if (requestUrl === "/api/turns/stream") {
         journeyMemoryEntries = [
           ...journeyMemoryEntries,
           {
@@ -291,45 +294,34 @@ describe("App", () => {
           }
         ];
 
+        const streamBody = [
+          "event: turn_started",
+          'data: {"type":"turn_started","userMessage":{"id":"message-user-1","sessionId":"session-1","role":"user","inputKind":"free","inferredIntent":"character_action","content":"我尝试调查高塔入口","createdAt":"2026-04-27T00:00:01.000Z"}}',
+          "",
+          "event: narration_chunk",
+          'data: {"type":"narration_chunk","assistantMessageId":"message-gm-1","chunk":"你开始行动。断星高塔入口的旧痕连在一起，指向更深处。"}',
+          "",
+          "event: suggested_moves_ready",
+          'data: {"type":"suggested_moves_ready","suggestedMoves":[{"id":"move-1","sessionId":"session-1","sourceMessageId":"message-gm-1","label":"尝试向 莉瑟 追问关键细节","intent":"玩家尝试通过交谈确认下一条线索","riskLevel":"low","tags":["交涉"],"createdAt":"2026-04-27T00:00:02.000Z"}]}',
+          "",
+          "event: turn_completed",
+          'data: {"type":"turn_completed","turn":{"messages":[{"id":"message-user-1","sessionId":"session-1","role":"user","inputKind":"free","inferredIntent":"character_action","content":"我尝试调查高塔入口","createdAt":"2026-04-27T00:00:01.000Z"},{"id":"message-gm-1","sessionId":"session-1","role":"assistant","content":"你开始行动。断星高塔入口的旧痕连在一起，指向更深处。","createdAt":"2026-04-27T00:00:02.000Z"}],"suggestedMoves":[{"id":"move-1","sessionId":"session-1","sourceMessageId":"message-gm-1","label":"尝试向 莉瑟 追问关键细节","intent":"玩家尝试通过交谈确认下一条线索","riskLevel":"low","tags":["交涉"],"createdAt":"2026-04-27T00:00:02.000Z"}]}}',
+          ""
+        ].join("\n");
+
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoder.encode(streamBody));
+            controller.close();
+          }
+        });
+
         return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              messages: [
-                {
-                  id: "message-user-1",
-                  sessionId: "session-1",
-                  role: "user",
-                  inputKind: "free",
-                  inferredIntent: "character_action",
-                  content: "我尝试调查高塔入口",
-                  createdAt: "2026-04-27T00:00:01.000Z"
-                },
-                {
-                  id: "message-gm-1",
-                  sessionId: "session-1",
-                  role: "assistant",
-                  content: "你开始行动。断星高塔入口的旧痕连在一起，指向更深处。",
-                  createdAt: "2026-04-27T00:00:02.000Z"
-                }
-              ],
-              suggestedMoves: [
-                {
-                  id: "move-1",
-                  sessionId: "session-1",
-                  sourceMessageId: "message-gm-1",
-                  label: "尝试向 莉瑟 追问关键细节",
-                  intent: "玩家尝试通过交谈确认下一条线索",
-                  riskLevel: "low",
-                  tags: ["交涉"],
-                  createdAt: "2026-04-27T00:00:02.000Z"
-                }
-              ]
-            }),
-            {
-              status: 200,
-              headers: { "Content-Type": "application/json" }
-            }
-          )
+          new Response(stream, {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" }
+          })
         );
       }
 
@@ -453,12 +445,6 @@ describe("App", () => {
     );
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/sessions",
-      expect.objectContaining({
-        method: "POST"
-      })
-    );
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/turns",
       expect.objectContaining({
         method: "POST"
       })

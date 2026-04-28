@@ -165,6 +165,16 @@ export async function requestOpenAiCompatibleJsonObject(input: {
   return content;
 }
 
+export async function* requestOpenAiCompatibleJsonObjectStream(input: {
+  config: OpenAiCompatibleProviderConfig;
+  label: string;
+  messages: readonly GmPromptMessage[];
+}): AsyncGenerator<string> {
+  // 过渡阶段：如果 provider 尚未启用原生流式，这里退化为单块输出。
+  // 上层仍可按阶段事件向前端推送，后续可替换为真实 token 流式解析。
+  yield await requestOpenAiCompatibleJsonObject(input);
+}
+
 function buildChatCompletionsUrl(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/u, "")}/chat/completions`;
 }
