@@ -375,6 +375,7 @@ h1 {
 
 .seed-card h3,
 .candidate-card h3 {
+  color: #221b15;
   margin: 0 0 10px;
   font-size: 24px;
 }
